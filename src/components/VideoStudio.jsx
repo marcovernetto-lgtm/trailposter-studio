@@ -27,10 +27,13 @@ import {
   MapPin,
   Sliders,
   Layers,
+  Search,
+  Wand2,
 } from 'lucide-react';
 import { buildTerrainScene } from '../lib/terrainEngine';
 import { createCameraController, CAMERA_MODES, resetCameraState } from '../lib/cameraSystem';
 import { exportVideo, downloadVideo, isVideoExportSupported } from '../lib/videoExporter';
+import { findTownsAlongTrack, geocodeAndSnapToTrack } from '../lib/geocoding';
 
 const OUTRO_SEC = 4.0; // 4 seconds final epic zoom-out reveal
 
@@ -62,6 +65,8 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
   const waypoints = config?.waypoints || [];
   const [newWaypointName, setNewWaypointName] = useState('');
   const [newWaypointPercent, setNewWaypointPercent] = useState(50);
+  const [isAutoFindingTowns, setIsAutoFindingTowns] = useState(false);
+  const [isSearchingTown, setIsSearchingTown] = useState(false);
 
   // Total video duration including 4-second grand outro reveal
   const totalDuration = duration + OUTRO_SEC;
@@ -506,7 +511,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
     }
   };
 
-  // Waypoints Management (Tappe)
+  // Waypoints Management (Tappe & Paesi)
   const handleAddWaypoint = () => {
     if (!newWaypointName.trim()) return;
     const newWpt = {
@@ -528,10 +533,62 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
     }
   };
 
-  const handleUpdateWaypointPercent = (id, percent) => {
-    const updated = waypoints.map((w) => (w.id === id ? { ...w, percent } : w));
+  const handleClearAllWaypoints = () => {
     if (setConfig) {
-      setConfig((prev) => ({ ...prev, waypoints: updated }));
+      setConfig((prev) => ({ ...prev, waypoints: [] }));
+    }
+  };
+
+  // Automatic Discovery of Towns & Villages along the route
+  const handleAutoFindTowns = async () => {
+    if (!points || points.length < 2) return;
+    setIsAutoFindingTowns(true);
+    try {
+      const found = await findTownsAlongTrack(points, 8);
+      if (found && found.length > 0) {
+        if (setConfig) {
+          setConfig((prev) => ({
+            ...prev,
+            waypoints: found,
+          }));
+        }
+      } else {
+        alert('Nessun paese o tappa rilevato nelle immediate vicinanze del percorso.');
+      }
+    } catch (err) {
+      console.error('Error finding towns:', err);
+      alert(`Errore nella ricerca automatica dei paesi: ${err.message}`);
+    } finally {
+      setIsAutoFindingTowns(false);
+    }
+  };
+
+  // Search single place via OpenStreetMap Geocoding
+  const handleSearchPlace = async () => {
+    if (!newWaypointName.trim() || !points || points.length < 2) return;
+    setIsSearchingTown(true);
+    try {
+      const matched = await geocodeAndSnapToTrack(newWaypointName.trim(), points);
+      if (matched) {
+        const newWpt = {
+          id: `wpt-${Date.now()}`,
+          name: matched.name,
+          percent: matched.percent,
+          lat: matched.lat,
+          lon: matched.lon,
+        };
+        const updated = [...waypoints.filter((w) => w.name !== matched.name), newWpt].sort(
+          (a, b) => a.percent - b.percent
+        );
+        if (setConfig) {
+          setConfig((prev) => ({ ...prev, waypoints: updated }));
+        }
+        setNewWaypointName('');
+      }
+    } catch (err) {
+      alert(err.message || 'Luogo non trovato.');
+    } finally {
+      setIsSearchingTown(false);
     }
   };
 
@@ -890,7 +947,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
           </div>
         </div>
 
-        {/* Card 2: Tappe sul Percorso (Cartelli 3D) */}
+        {/* Card 2: Tappe sul Percorso (Cartelli 3D & Ricerca Automatica Paesi) */}
         <div className="glass-card p-3.5 rounded-2xl border border-white/10 bg-[#181a20]/95 shadow-md space-y-3">
           <div className="flex items-center justify-between border-b border-white/5 pb-2">
             <div className="flex items-center gap-2">
@@ -899,26 +956,64 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
                 Tappe & Cartelli 3D ({waypoints.length})
               </h3>
             </div>
+            {waypoints.length > 0 && (
+              <button
+                onClick={handleClearAllWaypoints}
+                className="text-[10px] text-neutral-400 hover:text-rose-400 transition-colors"
+                title="Rimuovi tutte le tappe"
+              >
+                Cancella tutte
+              </button>
+            )}
           </div>
 
-          {/* Add New Waypoint */}
-          <div className="space-y-2">
-            <div className="flex gap-2">
+          {/* Automatic Discovery Button */}
+          <button
+            onClick={handleAutoFindTowns}
+            disabled={isAutoFindingTowns || !points || points.length < 2}
+            className="w-full flex items-center justify-center gap-2 p-2.5 rounded-xl bg-gradient-to-r from-teal-700/80 to-emerald-600/80 hover:from-teal-600 hover:to-emerald-500 text-white text-xs font-bold shadow transition-all border border-teal-400/30 disabled:opacity-50 disabled:cursor-not-allowed active:scale-98"
+          >
+            {isAutoFindingTowns ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-200" />
+                <span>Rilevamento paesi in corso...</span>
+              </>
+            ) : (
+              <>
+                <Wand2 className="w-3.5 h-3.5 text-teal-200" />
+                <span>Trova Paesi & Tappe Automaticamente</span>
+              </>
+            )}
+          </button>
+
+          {/* Add / Search New Waypoint */}
+          <div className="space-y-2 pt-1 border-t border-white/5">
+            <div className="flex gap-1.5">
               <input
                 type="text"
-                placeholder="Nome tappa (es. Rifugio, Vetta)..."
+                placeholder="Cerca o inserisci nome (es. Rifugio, Passo)..."
                 value={newWaypointName}
                 onChange={(e) => setNewWaypointName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleAddWaypoint()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSearchPlace();
+                }}
                 className="flex-1 bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-teal-400"
               />
               <button
+                onClick={handleSearchPlace}
+                disabled={!newWaypointName.trim() || isSearchingTown}
+                className="p-2 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 text-teal-300 rounded-xl transition-all"
+                title="Cerca luogo esatto su mappa"
+              >
+                {isSearchingTown ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+              </button>
+              <button
                 onClick={handleAddWaypoint}
                 disabled={!newWaypointName.trim()}
-                className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold flex items-center gap-1 transition-all"
+                className="px-2.5 py-1.5 bg-teal-600 hover:bg-teal-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold flex items-center gap-1 transition-all"
+                title="Aggiungi con percentuale manuale"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Aggiungi</span>
               </button>
             </div>
 
@@ -941,7 +1036,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
 
           {/* Waypoints List */}
           {waypoints.length > 0 ? (
-            <div className="space-y-1.5 max-h-36 overflow-y-auto custom-scrollbar pr-1">
+            <div className="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar pr-1">
               {waypoints.map((wpt, idx) => (
                 <div
                   key={wpt.id || idx}
@@ -970,7 +1065,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
             </div>
           ) : (
             <p className="text-[10px] text-neutral-500 italic">
-              Nessuna tappa inserita. Aggiungine una per vederla comparire come cartello 3D sulla mappa.
+              Nessuna tappa inserita. Clicca sul pulsante sopra per rilevarle automaticamente dal percorso.
             </p>
           )}
         </div>
