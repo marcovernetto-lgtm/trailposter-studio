@@ -40,7 +40,7 @@ export function ThreeCanvas({ trackData, config, onGpxUpload }) {
   const [isLoadingDEM, setIsLoadingDEM] = useState(false);
   const [demProgress, setDemProgress] = useState(0);
 
-  const [heightScale, setHeightScale] = useState(2.0); // 1.0 to 3.5
+  const [heightScale, setHeightScale] = useState(0.5); // 0.05 to 2.0 (natural to high relief)
   const [baseThickness, setBaseThickness] = useState(4.0); // 2 to 12 mm
   const [tubeRadius, setTubeRadius] = useState(1.4); // 0.6 to 3.5 mm
   const [trackLift, setTrackLift] = useState(1.0); // 0.4 to 2.5 mm
@@ -298,7 +298,7 @@ export function ThreeCanvas({ trackData, config, onGpxUpload }) {
         modelHeight: 140,
         baseThickness,
         heightScale,
-        maxElevationHeight: 28,
+        maxElevationHeight: 15,
         tubeRadius,
         trackLift,
         trackPadding: config?.trackPadding ?? 25,
@@ -485,19 +485,21 @@ export function ThreeCanvas({ trackData, config, onGpxUpload }) {
           <div className="space-y-1.5">
             <div className="flex items-center justify-between text-xs">
               <span className="text-neutral-400 font-medium">Esagerazione Vette</span>
-              <span className="font-mono text-teal-300 font-bold">{heightScale.toFixed(1)}×</span>
+              <span className="font-mono text-teal-300 font-bold">
+                {heightScale.toFixed(2)}× <span className="text-neutral-500 font-normal">({(heightScale * 15).toFixed(1)} mm)</span>
+              </span>
             </div>
             <input
               type="range"
-              min="0.8"
-              max="3.5"
-              step="0.1"
+              min="0.05"
+              max="2.0"
+              step="0.05"
               value={heightScale}
               onChange={(e) => setHeightScale(parseFloat(e.target.value))}
               className="w-full accent-teal-500 bg-neutral-800 rounded-lg h-1.5 cursor-pointer"
             />
             <p className="text-[10px] text-neutral-500">
-              Aumenta l'esagerazione per rendere le vette più ripide e spettacolari.
+              Da rilievo dolce e naturale (0.1× - 0.5×) a vette alpine accentuate (1.0× - 2.0×).
             </p>
           </div>
 
