@@ -9,10 +9,9 @@ import {
   Sparkles,
   Printer,
   Palette,
-  Eye,
   Loader2,
   Check,
-  Maximize2,
+  Upload,
 } from 'lucide-react';
 import { fetchElevationGrid } from '../lib/elevationContours';
 import {
@@ -26,7 +25,7 @@ import {
   exportOBJ,
 } from '../lib/stlExporter';
 
-export function ThreeCanvas({ trackData, config }) {
+export function ThreeCanvas({ trackData, config, onGpxUpload }) {
   const containerRef = useRef(null);
   const rendererRef = useRef(null);
   const sceneRef = useRef(null);
@@ -34,6 +33,7 @@ export function ThreeCanvas({ trackData, config }) {
   const terrainMeshRef = useRef(null);
   const trackMeshRef = useRef(null);
   const waypointsGroupRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   // 3D Parameters State
   const [elevGrid, setElevGrid] = useState(null);
@@ -57,7 +57,10 @@ export function ThreeCanvas({ trackData, config }) {
 
   // 1. Fetch Elevation Grid for 3D relief
   useEffect(() => {
-    if (!points || points.length === 0) return;
+    if (!points || points.length === 0) {
+      setElevGrid(null);
+      return;
+    }
 
     let isMounted = true;
     setIsLoadingDEM(true);
@@ -267,100 +270,107 @@ export function ThreeCanvas({ trackData, config }) {
     if (!sceneRef.current || !elevGrid) return;
     const scene = sceneRef.current;
 
-    // Clean old meshes
-    if (terrainMeshRef.current) {
-      scene.remove(terrainMeshRef.current);
-      terrainMeshRef.current.geometry.dispose();
-      terrainMeshRef.current = null;
-    }
-    if (trackMeshRef.current) {
-      scene.remove(trackMeshRef.current);
-      trackMeshRef.current.geometry.dispose();
-      trackMeshRef.current = null;
-    }
-    if (waypointsGroupRef.current) {
-      while (waypointsGroupRef.current.children.length > 0) {
-        const obj = waypointsGroupRef.current.children[0];
-        waypointsGroupRef.current.remove(obj);
-        if (obj.geometry) obj.geometry.dispose();
+    try {
+      // Clean old meshes safely
+      if (terrainMeshRef.current) {
+        scene.remove(terrainMeshRef.current);
+        if (terrainMeshRef.current.geometry) terrainMeshRef.current.geometry.dispose();
+        if (terrainMeshRef.current.material) terrainMeshRef.current.material.dispose();
+        terrainMeshRef.current = null;
       }
-    }
-
-    const geomOptions = {
-      modelWidth: 140,
-      modelHeight: 140,
-      baseThickness,
-      heightScale,
-      maxElevationHeight: 28,
-      tubeRadius,
-      trackLift,
-      trackPadding: config?.trackPadding ?? 25,
-    };
-
-    // 1. Create Terrain Solid Mesh
-    const terrainGeom = createTerrainSolidGeometry(elevGrid, geomOptions);
-    if (terrainGeom) {
-      let terrainMat;
-      if (viewStyle === 'wireframe') {
-        terrainMat = new THREE.MeshBasicMaterial({
-          color: terrainColor,
-          wireframe: true,
-        });
-      } else if (viewStyle === 'filament') {
-        terrainMat = new THREE.MeshLambertMaterial({
-          color: terrainColor,
-          flatShading: true,
-        });
-      } else {
-        // Shaded Fine-Art
-        terrainMat = new THREE.MeshStandardMaterial({
-          color: terrainColor,
-          roughness: 0.75,
-          metalness: 0.1,
-          flatShading: false,
-        });
+      if (trackMeshRef.current) {
+        scene.remove(trackMeshRef.current);
+        if (trackMeshRef.current.geometry) trackMeshRef.current.geometry.dispose();
+        if (trackMeshRef.current.material) trackMeshRef.current.material.dispose();
+        trackMeshRef.current = null;
+      }
+      if (waypointsGroupRef.current) {
+        while (waypointsGroupRef.current.children.length > 0) {
+          const obj = waypointsGroupRef.current.children[0];
+          waypointsGroupRef.current.remove(obj);
+          if (obj.geometry) obj.geometry.dispose();
+          if (obj.material) obj.material.dispose();
+        }
       }
 
-      const terrainMesh = new THREE.Mesh(terrainGeom, terrainMat);
-      terrainMesh.receiveShadow = true;
-      terrainMesh.castShadow = true;
-      scene.add(terrainMesh);
-      terrainMeshRef.current = terrainMesh;
-    }
+      const geomOptions = {
+        modelWidth: 140,
+        modelHeight: 140,
+        baseThickness,
+        heightScale,
+        maxElevationHeight: 28,
+        tubeRadius,
+        trackLift,
+        trackPadding: config?.trackPadding ?? 25,
+      };
 
-    // 2. Create GPX Track Tube Mesh
-    if (points && points.length > 1) {
-      const trackGeom = createTrackTubeGeometry(points, elevGrid, geomOptions);
-      if (trackGeom) {
-        const trackMat = new THREE.MeshStandardMaterial({
-          color: track3DColor,
-          roughness: 0.3,
-          metalness: 0.4,
-          emissive: track3DColor,
-          emissiveIntensity: 0.25,
-        });
-        const trackMesh = new THREE.Mesh(trackGeom, trackMat);
-        trackMesh.castShadow = true;
-        scene.add(trackMesh);
-        trackMeshRef.current = trackMesh;
+      // 1. Create Terrain Solid Mesh
+      const terrainGeom = createTerrainSolidGeometry(elevGrid, geomOptions);
+      if (terrainGeom) {
+        let terrainMat;
+        if (viewStyle === 'wireframe') {
+          terrainMat = new THREE.MeshBasicMaterial({
+            color: terrainColor,
+            wireframe: true,
+          });
+        } else if (viewStyle === 'filament') {
+          terrainMat = new THREE.MeshLambertMaterial({
+            color: terrainColor,
+            flatShading: true,
+          });
+        } else {
+          // Shaded Fine-Art
+          terrainMat = new THREE.MeshStandardMaterial({
+            color: terrainColor,
+            roughness: 0.75,
+            metalness: 0.1,
+            flatShading: false,
+          });
+        }
+
+        const terrainMesh = new THREE.Mesh(terrainGeom, terrainMat);
+        terrainMesh.receiveShadow = true;
+        terrainMesh.castShadow = true;
+        scene.add(terrainMesh);
+        terrainMeshRef.current = terrainMesh;
       }
-    }
 
-    // 3. Create Waypoint Pin Markers
-    if (config?.waypoints && config.waypoints.length > 0) {
-      const markers = createWaypointMarkers(config.waypoints, elevGrid, geomOptions);
-      markers.forEach((m) => {
-        const sphereGeom = new THREE.SphereGeometry(2.0, 16, 16);
-        const sphereMat = new THREE.MeshStandardMaterial({
-          color: '#ffffff',
-          emissive: '#f59e0b',
-          emissiveIntensity: 0.5,
+      // 2. Create GPX Track Tube Mesh
+      if (points && points.length > 1) {
+        const trackGeom = createTrackTubeGeometry(points, elevGrid, geomOptions);
+        if (trackGeom) {
+          const trackMat = new THREE.MeshStandardMaterial({
+            color: track3DColor,
+            roughness: 0.3,
+            metalness: 0.4,
+            emissive: track3DColor,
+            emissiveIntensity: 0.25,
+          });
+          const trackMesh = new THREE.Mesh(trackGeom, trackMat);
+          trackMesh.castShadow = true;
+          scene.add(trackMesh);
+          trackMeshRef.current = trackMesh;
+        }
+      }
+
+      // 3. Create Waypoint Pin Markers
+      if (config?.waypoints && config.waypoints.length > 0) {
+        const markers = createWaypointMarkers(config.waypoints, elevGrid, geomOptions);
+        markers.forEach((m) => {
+          const sphereGeom = new THREE.SphereGeometry(2.0, 16, 16);
+          const sphereMat = new THREE.MeshStandardMaterial({
+            color: '#ffffff',
+            emissive: '#f59e0b',
+            emissiveIntensity: 0.5,
+          });
+          const mesh = new THREE.Mesh(sphereGeom, sphereMat);
+          mesh.position.copy(m.position);
+          mesh.castShadow = true;
+          waypointsGroupRef.current.add(mesh);
         });
-        const mesh = new THREE.Mesh(sphereGeom, sphereMat);
-        mesh.position.copy(m.position);
-        mesh.castShadow = true;
-        waypointsGroupRef.current.add(mesh);
-      });
+      }
+    } catch (meshErr) {
+      console.error('Error generating 3D meshes:', meshErr);
     }
   }, [
     elevGrid,
@@ -440,6 +450,18 @@ export function ThreeCanvas({ trackData, config }) {
 
   return (
     <div className="w-full flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      {/* Hidden file input for GPX upload */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".gpx"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file && onGpxUpload) onGpxUpload(file);
+        }}
+        className="hidden"
+      />
+
       {/* 3D Sidebar Controls (4 Cols on LG) */}
       <div className="lg:col-span-4 h-[calc(100vh-100px)] sticky top-20 flex flex-col space-y-4 overflow-y-auto custom-scrollbar pr-1">
         {/* Card 1: Altimetria & Esagerazione Vette */}
@@ -732,18 +754,42 @@ export function ThreeCanvas({ trackData, config }) {
           </div>
         </div>
 
-        {/* 3D Canvas WebGL Container */}
-        <div
-          ref={containerRef}
-          className="w-full h-[calc(100vh-130px)] min-h-[550px] cursor-grab active:cursor-grabbing flex items-center justify-center"
-        />
+        {/* If no track loaded yet, show prompt */}
+        {(!points || points.length === 0) ? (
+          <div className="flex flex-col items-center justify-center p-8 text-center space-y-4 z-10">
+            <div className="w-16 h-16 rounded-2xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400">
+              <Box className="w-8 h-8" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white mb-1">Nessuna traccia caricata</h3>
+              <p className="text-xs text-neutral-400 max-w-md">
+                Carica una traccia GPX per generare il rilievo 3D con montagne e sentiero estruso.
+              </p>
+            </div>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 px-5 py-2.5 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-teal-500/20 transition-all active:scale-95"
+            >
+              <Upload className="w-4 h-4" />
+              <span>Carica File GPX</span>
+            </button>
+          </div>
+        ) : (
+          /* 3D Canvas WebGL Container */
+          <div
+            ref={containerRef}
+            className="w-full h-[calc(100vh-130px)] min-h-[550px] cursor-grab active:cursor-grabbing flex items-center justify-center"
+          />
+        )}
 
         {/* Floating Instructions Bottom */}
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-none z-10">
-          <span className="text-[11px] font-mono text-neutral-400 bg-neutral-950/80 px-4 py-1.5 rounded-full border border-white/10 shadow-lg backdrop-blur-md">
-            🖱️ Trascina per ruotare a 360° • Rotella per Zoom • Shift + Trascina per Pan
-          </span>
-        </div>
+        {points && points.length > 0 && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-none z-10">
+            <span className="text-[11px] font-mono text-neutral-400 bg-neutral-950/80 px-4 py-1.5 rounded-full border border-white/10 shadow-lg backdrop-blur-md">
+              🖱️ Trascina per ruotare a 360° • Rotella per Zoom • Shift + Trascina per Pan
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

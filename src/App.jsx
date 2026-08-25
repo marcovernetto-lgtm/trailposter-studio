@@ -223,6 +223,7 @@ export function App() {
           <ThreeCanvas
             trackData={trackData}
             config={config}
+            onGpxUpload={handleGpxUpload}
           />
         )}
       </main>

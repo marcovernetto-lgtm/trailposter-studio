@@ -2,6 +2,21 @@ import * as THREE from 'three';
 import { latLonToMercator } from './gpxParser';
 
 /**
+ * Helper to get elevation value at (xIdx, yIdx) supporting both 1D Float32Array and 2D arrays
+ */
+function getGridElevation(elevGrid, xIdx, yIdx) {
+  if (!elevGrid || !elevGrid.grid) return 0;
+  const grid = elevGrid.grid;
+  const resX = elevGrid.width || Math.round(Math.sqrt(grid.length)) || 100;
+
+  if (Array.isArray(grid) && Array.isArray(grid[0])) {
+    return grid[yIdx]?.[xIdx] ?? 0;
+  }
+  const idx = yIdx * resX + xIdx;
+  return grid[idx] ?? 0;
+}
+
+/**
  * Generates a watertight 3D solid terrain mesh (top relief, 4 side skirts, flat bottom)
  * suitable for 3D printing (STL/OBJ) and real-time WebGL rendering.
  */
@@ -10,15 +25,16 @@ export function createTerrainSolidGeometry(elevGrid, options = {}) {
 
   const {
     modelWidth = 140, // mm
-    modelHeight = 140, // mm (or scaled to aspect ratio)
+    modelHeight = 140, // mm
     baseThickness = 4, // mm below lowest elevation
     heightScale = 1.8, // vertical elevation exaggeration
     maxElevationHeight = 25, // max height relief in mm
   } = options;
 
   const grid = elevGrid.grid;
-  const resY = grid.length;
-  const resX = grid[0].length;
+  const resX = elevGrid.width || Math.round(Math.sqrt(grid.length)) || 100;
+  const resY = elevGrid.height || Math.round(Math.sqrt(grid.length)) || 100;
+
   const minEle = elevGrid.minEle || 0;
   const maxEle = elevGrid.maxEle || 1000;
   const eleSpan = Math.max(1, maxEle - minEle);
@@ -33,7 +49,7 @@ export function createTerrainSolidGeometry(elevGrid, options = {}) {
 
   // Helper to get normalized 3D coords
   const getZ = (xIdx, yIdx) => {
-    const rawEle = grid[yIdx][xIdx];
+    const rawEle = getGridElevation(elevGrid, xIdx, yIdx);
     const normalized = (rawEle - minEle) / eleSpan;
     return baseThickness + normalized * maxElevationHeight * heightScale;
   };
@@ -155,8 +171,8 @@ export function createTerrainSolidGeometry(elevGrid, options = {}) {
 export function sampleElevationAt(elevGrid, sx, sy) {
   if (!elevGrid || !elevGrid.grid) return 0;
   const grid = elevGrid.grid;
-  const resY = grid.length;
-  const resX = grid[0].length;
+  const resX = elevGrid.width || Math.round(Math.sqrt(grid.length)) || 100;
+  const resY = elevGrid.height || Math.round(Math.sqrt(grid.length)) || 100;
 
   const SVG_SIZE = 1000;
   const u = Math.max(0, Math.min(1, sx / SVG_SIZE));
@@ -171,10 +187,10 @@ export function sampleElevationAt(elevGrid, sx, sy) {
   const fx = gx - x0;
   const fy = gy - y0;
 
-  const h00 = grid[y0][x0];
-  const h10 = grid[y0][x1];
-  const h01 = grid[y1][x0];
-  const h11 = grid[y1][x1];
+  const h00 = getGridElevation(elevGrid, x0, y0);
+  const h10 = getGridElevation(elevGrid, x1, y0);
+  const h01 = getGridElevation(elevGrid, x0, y1);
+  const h11 = getGridElevation(elevGrid, x1, y1);
 
   const top = h00 * (1 - fx) + h10 * fx;
   const btm = h01 * (1 - fx) + h11 * fx;
@@ -228,8 +244,9 @@ export function createTrackTubeGeometry(points, elevGrid, options = {}) {
   const halfH = modelHeight / 2;
 
   // Subsample or smooth points if too dense
-  const step = Math.max(1, Math.floor(points.length / 400));
+  const step = Math.max(1, Math.floor(points.length / 300));
   const curvePoints = [];
+  let lastAdded = null;
 
   for (let i = 0; i < points.length; i += step) {
     const p = points[i];
@@ -251,11 +268,15 @@ export function createTrackTubeGeometry(points, elevGrid, options = {}) {
     const normalizedEle = (sampleEle - minEle) / eleSpan;
     const z3d = baseThickness + normalizedEle * maxElevationHeight * heightScale + trackLift;
 
-    curvePoints.push(new THREE.Vector3(x3d, y3d, z3d));
+    const pt = new THREE.Vector3(x3d, y3d, z3d);
+    if (!lastAdded || pt.distanceTo(lastAdded) > 0.05) {
+      curvePoints.push(pt);
+      lastAdded = pt;
+    }
   }
 
-  // Ensure last point is included
-  if (curvePoints.length > 1) {
+  // Ensure last point is included if distinct
+  if (points.length > 0) {
     const lastP = points[points.length - 1];
     const mx = lastP.mx != null ? lastP.mx : latLonToMercator(lastP.lat, lastP.lon).x;
     const my = lastP.my != null ? lastP.my : latLonToMercator(lastP.lat, lastP.lon).y;
@@ -268,16 +289,23 @@ export function createTrackTubeGeometry(points, elevGrid, options = {}) {
     const sampleEle = sampleElevationAt(elevGrid, sx, sy);
     const normalizedEle = (sampleEle - minEle) / eleSpan;
     const z3d = baseThickness + normalizedEle * maxElevationHeight * heightScale + trackLift;
-    curvePoints[curvePoints.length - 1] = new THREE.Vector3(x3d, y3d, z3d);
+    const pt = new THREE.Vector3(x3d, y3d, z3d);
+    if (!lastAdded || pt.distanceTo(lastAdded) > 0.05) {
+      curvePoints.push(pt);
+    }
   }
 
   if (curvePoints.length < 2) return null;
 
-  const curve = new THREE.CatmullRomCurve3(curvePoints);
-  const segments = Math.min(800, curvePoints.length * 3);
-  const radialSegments = 8;
-
-  return new THREE.TubeGeometry(curve, segments, tubeRadius, radialSegments, false);
+  try {
+    const curve = new THREE.CatmullRomCurve3(curvePoints, false, 'centripetal');
+    const segments = Math.max(10, Math.min(600, curvePoints.length * 2));
+    const radialSegments = 8;
+    return new THREE.TubeGeometry(curve, segments, tubeRadius, radialSegments, false);
+  } catch (err) {
+    console.warn('TubeGeometry creation error:', err);
+    return null;
+  }
 }
 
 /**
@@ -292,7 +320,6 @@ export function createWaypointMarkers(waypoints, elevGrid, options = {}) {
     baseThickness = 4,
     heightScale = 1.8,
     maxElevationHeight = 25,
-    trackPadding = 25,
   } = options;
 
   const minEle = elevGrid.minEle || 0;
