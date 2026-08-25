@@ -317,22 +317,11 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
   const totalSpanM = Math.max(boundMaxMx - boundMinMx, boundMaxMy - boundMinMy);
 
-  // 2. Intelligent Dynamic Zoom Selection (Guaranteed 100% Coverage Without Truncation)
-  let maxAxisTiles = 18;
-  let maxTotalTiles = 220;
+  // 2. Intelligent Dynamic Zoom Selection (Always Maximum Ultra 4K HD Resolution)
+  const maxAxisTiles = 28;
+  const maxTotalTiles = 450;
 
-  if (config.quality === 'ultra') {
-    maxAxisTiles = 20;
-    maxTotalTiles = 260;
-  } else if (config.quality === 'high') {
-    maxAxisTiles = 16;
-    maxTotalTiles = 180;
-  } else {
-    maxAxisTiles = 12;
-    maxTotalTiles = 110;
-  }
-
-  let zoom = 14;
+  let zoom = 15;
   let startTx = 0, endTx = 0, startTy = 0, endTy = 0;
   let numTilesX = 0, numTilesY = 0;
 
@@ -356,7 +345,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   }
 
   if (numTilesX === 0) {
-    zoom = 12;
+    zoom = 13;
     const minT = mercatorToTile(boundMinMx, boundMaxMy, zoom);
     const maxT = mercatorToTile(boundMaxMx, boundMinMy, zoom);
     startTx = minT.tx;
@@ -402,7 +391,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
   const demZoom = Math.min(15, Math.max(12, zoom));
 
-  await asyncPool(18, tileItems, async ({ tx, ty, col, row }) => {
+  await asyncPool(24, tileItems, async ({ tx, ty, col, row }) => {
     const px = col * 256;
     const py = row * 256;
 

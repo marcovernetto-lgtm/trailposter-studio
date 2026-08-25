@@ -906,62 +906,34 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
 
       {/* Sidebar Controls (Left - 4 Cols on LG) - Minimal & Clean in Teal / Slate */}
       <div className="lg:col-span-4 h-[calc(100vh-100px)] sticky top-20 flex flex-col space-y-3 overflow-y-auto custom-scrollbar pr-1">
-        {/* Card 1: Satellite Resolution */}
+        {/* Card 1: Satellite Resolution (Always Ultra 4K Max) */}
         <div className="glass-card p-3.5 rounded-2xl border border-white/10 bg-[#181a20]/95 shadow-md space-y-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Layers className="w-4 h-4 text-teal-400" />
               <div>
                 <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-                  Dettaglio Satellite
+                  Mappa Satellite 4K Ultra HD
                 </h3>
-                <p className="text-[10px] text-neutral-400">Esri World Imagery Fotografico</p>
+                <p className="text-[10px] text-neutral-400">Esri World Imagery Fotografico Max</p>
               </div>
             </div>
             <button
               onClick={buildScene}
               disabled={isBuilding}
-              className="text-neutral-400 hover:text-teal-300 transition-colors p-1 rounded-lg hover:bg-white/5"
-              title="Ricarica Terreno 3D"
+              className="text-neutral-400 hover:text-teal-300 transition-colors p-1.5 rounded-lg hover:bg-white/5"
+              title="Ricarica Terreno 3D in 4K"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isBuilding ? 'animate-spin text-teal-400' : ''}`} />
             </button>
           </div>
 
-          <div className="grid grid-cols-3 gap-1.5 p-1 bg-black/40 rounded-xl border border-white/5 text-[11px]">
-            <button
-              onClick={() => setSatelliteQuality('ultra')}
-              className={`py-1 px-2 rounded-lg font-bold transition-all flex flex-col items-center gap-0.5 ${
-                satelliteQuality === 'ultra'
-                  ? 'bg-teal-600 text-white shadow-sm'
-                  : 'text-neutral-400 hover:text-white'
-              }`}
-            >
-              <span>Ultra 4K</span>
-              <span className="text-[9px] opacity-75 font-mono">Zoom 16-17</span>
-            </button>
-            <button
-              onClick={() => setSatelliteQuality('high')}
-              className={`py-1 px-2 rounded-lg font-bold transition-all flex flex-col items-center gap-0.5 ${
-                satelliteQuality === 'high'
-                  ? 'bg-teal-600 text-white shadow-sm'
-                  : 'text-neutral-400 hover:text-white'
-              }`}
-            >
-              <span>Super HD</span>
-              <span className="text-[9px] opacity-75 font-mono">Zoom 15-16</span>
-            </button>
-            <button
-              onClick={() => setSatelliteQuality('standard')}
-              className={`py-1 px-2 rounded-lg font-bold transition-all flex flex-col items-center gap-0.5 ${
-                satelliteQuality === 'standard'
-                  ? 'bg-teal-600 text-white shadow-sm'
-                  : 'text-neutral-400 hover:text-white'
-              }`}
-            >
-              <span>Veloce</span>
-              <span className="text-[9px] opacity-75 font-mono">Zoom 14</span>
-            </button>
+          <div className="flex items-center justify-between px-3 py-2 bg-black/40 rounded-xl border border-teal-500/20 text-xs">
+            <span className="text-neutral-300 font-medium flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
+              Risoluzione Mappa:
+            </span>
+            <span className="font-mono text-teal-300 font-bold">Ultra 4K Max</span>
           </div>
         </div>
 
