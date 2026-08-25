@@ -35,7 +35,7 @@ import { createCameraController, CAMERA_MODES, resetCameraState } from '../lib/c
 import { exportVideo, downloadVideo, isVideoExportSupported } from '../lib/videoExporter';
 import { findTownsAlongTrack, geocodeAndSnapToTrack } from '../lib/geocoding';
 
-const OUTRO_SEC = 4.0; // 4 seconds final epic zoom-out reveal
+const OUTRO_SEC = 7.0; // 7 seconds final epic zoom-out reveal
 
 export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
   const containerRef = useRef(null);
@@ -1301,7 +1301,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
             <div className="flex items-center justify-between text-xs">
               <span className="text-neutral-400 font-medium">Volo + Outro Panoramico</span>
               <span className="font-mono text-teal-300 font-bold">
-                {duration}s + 4s ({totalDuration}s)
+                {duration}s + 7s ({totalDuration}s)
               </span>
             </div>
             <div className="grid grid-cols-4 gap-1.5 p-1 bg-black/40 rounded-xl border border-white/5 text-xs">
@@ -1487,7 +1487,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
             <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
             <span className="text-xs font-mono tracking-wider text-neutral-200 uppercase">
               {timeProgress.isOutro
-                ? 'Outro Finale Panoramico (4s)'
+                ? 'Outro Finale Panoramico (7s)'
                 : directorType === 'keyframe'
                 ? `Regia Keyframe (${keyframes.length} scene)`
                 : `Regia • ${CAMERA_MODES[cameraMode]?.name}`}
@@ -1731,7 +1731,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
 
                   {timeProgress.isOutro && (
                     <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-bold">
-                      Zoom Out Finale (4s)
+                      Zoom Out Finale (7s)
                     </span>
                   )}
                 </div>

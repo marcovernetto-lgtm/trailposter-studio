@@ -284,7 +284,7 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
       lerpFactor = 0.05;
     }
 
-    // 7. FINAL 4-SECOND CINEMATIC OUTRO ZOOM OUT
+    // 7. FINAL 7-SECOND CINEMATIC OUTRO ZOOM OUT (GRAND REVEAL)
     if (outroProgress > 0) {
       const p = Math.max(0, Math.min(outroProgress, 1.0));
       const smoothP = p * p * (3 - 2 * p);
@@ -292,9 +292,9 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
       const finishPos = desiredPosition.clone();
       const finishLook = desiredLookAt.clone();
 
-      const outroAngle = Math.PI / 4 + p * 0.15;
-      const outroHeight = 650;
-      const outroDist = 450;
+      const outroAngle = Math.PI / 4 + p * 0.30;
+      const outroHeight = 720;
+      const outroDist = 520;
 
       const grandOverviewPos = new THREE.Vector3(
         centroid.x + outroDist * Math.cos(outroAngle),
@@ -304,7 +304,7 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
 
       desiredPosition.lerpVectors(finishPos, grandOverviewPos, smoothP);
       desiredLookAt.lerpVectors(finishLook, centroid, smoothP);
-      lerpFactor = 0.06;
+      lerpFactor = 0.05;
     }
 
     // Apply smooth exponential damping
