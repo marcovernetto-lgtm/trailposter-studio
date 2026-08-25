@@ -612,6 +612,11 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     skirtTexture.needsUpdate = true;
   };
 
+  const setDistantBlur = (enabled = true, strength = 'medium') => {
+    const px = strength === 'heavy' ? 14 : strength === 'soft' ? 4 : 8;
+    renderSkirtTexture(enabled, px);
+  };
+
   const initialStrength = config.distantBlurStrength || 'medium';
   const initialBlurPx = initialStrength === 'heavy' ? 14 : initialStrength === 'soft' ? 4 : 8;
   renderSkirtTexture(config.distantBlur !== false, initialBlurPx);
