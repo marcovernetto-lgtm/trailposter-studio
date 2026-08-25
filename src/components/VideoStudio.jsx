@@ -300,7 +300,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
 
       // Position camera at start
       const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
-      ctrl.updateCamera(sceneData.camera, 0, activeMode, keyframes, 0);
+      ctrl.updateCamera(sceneData.camera, 0, activeMode, keyframes, 0, aspectRatio === '9:16');
 
       if (orbitControlsRef.current) {
         const startTarget = sceneData.trackCurve.getPointAt(0);
@@ -329,7 +329,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
     } finally {
       setIsBuilding(false);
     }
-  }, [points, satelliteQuality, heightExaggeration, trackColor, trackWidth, waypoints]);
+  }, [points, heightExaggeration, trackColor, trackWidth, waypoints, aspectRatio]);
 
   // Initial load & trigger build on point/elevation/waypoints changes
   useEffect(() => {
@@ -340,7 +340,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
       if (animIdRef.current) cancelAnimationFrame(animIdRef.current);
       if (orbitControlsRef.current) orbitControlsRef.current.dispose();
     };
-  }, [points, satelliteQuality, heightExaggeration, trackColor, trackWidth, waypoints]);
+  }, [points, heightExaggeration, trackColor, trackWidth, waypoints]);
 
   // Responsive Canvas Resize Observer
   useEffect(() => {
@@ -361,6 +361,21 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
     resizeObserver.observe(container);
     return () => resizeObserver.disconnect();
   }, []);
+
+  // Update Camera when aspectRatio changes
+  useEffect(() => {
+    if (sceneDataRef.current && cameraCtrlRef.current) {
+      const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
+      cameraCtrlRef.current.updateCamera(
+        sceneDataRef.current.camera,
+        timeProgress.trailProgress,
+        activeMode,
+        keyframes,
+        timeProgress.outroProgress,
+        aspectRatio === '9:16'
+      );
+    }
+  }, [aspectRatio]);
 
   // Preview Animation Playback Loop
   useEffect(() => {
@@ -387,7 +402,14 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
 
       setPreviewProgress(overallProgress);
       sceneDataRef.current.updateProgress(tp);
-      cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, tp, activeMode, keyframes, op);
+      cameraCtrlRef.current.updateCamera(
+        sceneDataRef.current.camera,
+        tp,
+        activeMode,
+        keyframes,
+        op,
+        aspectRatio === '9:16'
+      );
 
       if (orbitControlsRef.current && op === 0) {
         const currentTarget = sceneDataRef.current.trackCurve.getPointAt(Math.min(0.999, tp));
@@ -404,7 +426,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
 
     localAnimId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(localAnimId);
-  }, [isPreviewPlaying, cameraMode, directorType, keyframes, duration, totalDuration]);
+  }, [isPreviewPlaying, cameraMode, directorType, keyframes, duration, totalDuration, aspectRatio]);
 
   // Scrubbing Timeline Slider
   const handleScrub = (val) => {
@@ -425,7 +447,14 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
     if (sceneDataRef.current && cameraCtrlRef.current) {
       sceneDataRef.current.updateProgress(tp);
       const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
-      cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, tp, activeMode, keyframes, op);
+      cameraCtrlRef.current.updateCamera(
+        sceneDataRef.current.camera,
+        tp,
+        activeMode,
+        keyframes,
+        op,
+        aspectRatio === '9:16'
+      );
 
       if (orbitControlsRef.current && op === 0) {
         const currentTarget = sceneDataRef.current.trackCurve.getPointAt(Math.min(0.999, tp));
@@ -447,7 +476,8 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
           timeProgress.trailProgress,
           mode,
           keyframes,
-          timeProgress.outroProgress
+          timeProgress.outroProgress,
+          aspectRatio === '9:16'
         );
       }
     }
@@ -629,7 +659,14 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
     if (sceneDataRef.current && cameraCtrlRef.current) {
       sceneDataRef.current.updateProgress(0);
       const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
-      cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, 0, activeMode, keyframes, 0);
+      cameraCtrlRef.current.updateCamera(
+        sceneDataRef.current.camera,
+        0,
+        activeMode,
+        keyframes,
+        0,
+        aspectRatio === '9:16'
+      );
       if (orbitControlsRef.current) {
         orbitControlsRef.current.target.copy(sceneDataRef.current.trackCurve.getPointAt(0));
         orbitControlsRef.current.update();
@@ -637,18 +674,20 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
     }
   };
 
-  // Draw Minimal Progressive Liquid Glass Telemetry HUD on Exported Video Frame
+  // Draw Minimal Progressive Liquid Glass Telemetry HUD on Exported Video Frame (Adaptive Scale for 16:9 & 9:16)
   const drawHudOnVideo = useCallback(
     (ctx, width, height, progress) => {
       if (!showHud || !points || points.length < 2) return;
 
-      const scale = width / 1920;
-      const cardW = 320 * scale;
-      const cardH = 110 * scale;
-      const margin = 32 * scale;
+      const isVertical = height > width;
+      // On vertical 9:16 (1080x1920), scale is normalized to 1080 width with a multiplier so it matches mobile UI proportions
+      const baseScale = isVertical ? (width / 1080) * 1.35 : (width / 1920);
+      const cardW = (isVertical ? 330 : 320) * baseScale;
+      const cardH = (isVertical ? 116 : 110) * baseScale;
+      const margin = (isVertical ? 36 : 32) * (isVertical ? width / 1080 : width / 1920);
 
       let cardX = margin;
-      let cardY = margin + 20 * scale; // Default top-left
+      let cardY = margin + (isVertical ? 32 : 20) * (isVertical ? width / 1080 : width / 1920); // Default top-left
 
       if (hudPosition === 'bottom_left') {
         cardY = height - cardH - margin;
@@ -657,7 +696,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
         cardY = height - cardH - margin;
       } else if (hudPosition === 'top_right') {
         cardX = width - cardW - margin;
-        cardY = margin + 20 * scale;
+        cardY = margin + (isVertical ? 32 : 20) * (isVertical ? width / 1080 : width / 1920);
       }
 
       const elapsed = progress * totalDuration;
@@ -676,11 +715,11 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
 
       // 1. Draw Minimal Frosted Glass Card Background
       ctx.save();
-      ctx.fillStyle = 'rgba(10, 14, 20, 0.65)';
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
-      ctx.lineWidth = 1.2 * scale;
+      ctx.fillStyle = 'rgba(10, 14, 20, 0.70)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.20)';
+      ctx.lineWidth = 1.4 * baseScale;
 
-      const r = 14 * scale;
+      const r = 14 * baseScale;
       ctx.beginPath();
       ctx.moveTo(cardX + r, cardY);
       ctx.lineTo(cardX + cardW - r, cardY);
@@ -695,42 +734,50 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
       ctx.fill();
       ctx.stroke();
 
-      // Top Glass Highlight
-      const grad = ctx.createLinearGradient(cardX, cardY, cardX, cardY + 20 * scale);
-      grad.addColorStop(0, 'rgba(255, 255, 255, 0.12)');
+      // Top Glass Specular Gradient Highlight
+      const grad = ctx.createLinearGradient(cardX, cardY, cardX, cardY + 22 * baseScale);
+      grad.addColorStop(0, 'rgba(255, 255, 255, 0.14)');
       grad.addColorStop(1, 'rgba(255, 255, 255, 0.0)');
       ctx.fillStyle = grad;
       ctx.fill();
 
       // 2. Draw Distance & Elevation Gain Stats
       ctx.fillStyle = '#ffffff';
-      ctx.font = `bold ${15 * scale}px "Outfit", sans-serif`;
-      ctx.fillText(`${curDistKm} km`, cardX + 14 * scale, cardY + 22 * scale);
+      ctx.font = `bold ${16 * baseScale}px "Outfit", system-ui, -apple-system, sans-serif`;
+      ctx.textAlign = 'left';
+      ctx.fillText(`${curDistKm} km`, cardX + 14 * baseScale, cardY + 23 * baseScale);
 
+      const kmMetrics = ctx.measureText(`${curDistKm} km`);
       ctx.fillStyle = '#94a3b8';
-      ctx.font = `${10 * scale}px sans-serif`;
-      ctx.fillText(`/ ${totalDistanceKm} km`, cardX + 75 * scale, cardY + 22 * scale);
+      ctx.font = `${10 * baseScale}px "Outfit", system-ui, -apple-system, sans-serif`;
+      ctx.fillText(
+        `/ ${totalDistanceKm} km`,
+        cardX + 14 * baseScale + kmMetrics.width + 5 * baseScale,
+        cardY + 23 * baseScale
+      );
 
-      // Altitude & D+
+      // Altitude & D+ (Right aligned)
+      ctx.textAlign = 'right';
       if (isOutro) {
         ctx.fillStyle = '#f59e0b';
-        ctx.font = `bold ${11 * scale}px sans-serif`;
-        ctx.fillText(`TRAGUARDO`, cardX + cardW - 85 * scale, cardY + 22 * scale);
+        ctx.font = `bold ${11 * baseScale}px "Outfit", system-ui, -apple-system, sans-serif`;
+        ctx.fillText(`TRAGUARDO`, cardX + cardW - 14 * baseScale, cardY + 23 * baseScale);
       } else {
         ctx.fillStyle = '#facc15';
-        ctx.font = `bold ${14 * scale}px "JetBrains Mono", monospace`;
-        ctx.fillText(`${curEle} m`, cardX + cardW - 65 * scale, cardY + 22 * scale);
+        ctx.font = `bold ${15 * baseScale}px "JetBrains Mono", monospace`;
+        ctx.fillText(`${curEle} m`, cardX + cardW - 14 * baseScale, cardY + 23 * baseScale);
       }
 
+      ctx.textAlign = 'left';
       ctx.fillStyle = '#f59e0b';
-      ctx.font = `${10 * scale}px sans-serif`;
-      ctx.fillText(`+${curGain}m D+`, cardX + 14 * scale, cardY + 38 * scale);
+      ctx.font = `bold ${10 * baseScale}px "Outfit", system-ui, -apple-system, sans-serif`;
+      ctx.fillText(`+${curGain}m D+`, cardX + 14 * baseScale, cardY + 39 * baseScale);
 
       // 3. Draw Progressive Elevation Profile Curve
-      const chartX = cardX + 14 * scale;
-      const chartY = cardY + 46 * scale;
-      const chartW = cardW - 28 * scale;
-      const chartH = 50 * scale;
+      const chartX = cardX + 14 * baseScale;
+      const chartY = cardY + 47 * baseScale;
+      const chartW = cardW - 28 * baseScale;
+      const chartH = cardH - 58 * baseScale;
 
       const spanE = Math.max(30, maxElevation - minElevation);
 
@@ -742,8 +789,8 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
         if (idx === 0) ctx.moveTo(px, py);
         else ctx.lineTo(px, py);
       });
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
-      ctx.lineWidth = 1.0 * scale;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.lineWidth = 1.0 * baseScale;
       ctx.stroke();
 
       // Progressive Active Filled Area
@@ -763,7 +810,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
       ctx.closePath();
 
       const areaGrad = ctx.createLinearGradient(chartX, chartY, chartX, chartY + chartH);
-      areaGrad.addColorStop(0, 'rgba(250, 204, 21, 0.35)');
+      areaGrad.addColorStop(0, 'rgba(250, 204, 21, 0.40)');
       areaGrad.addColorStop(1, 'rgba(250, 204, 21, 0.02)');
       ctx.fillStyle = areaGrad;
       ctx.fill();
@@ -779,21 +826,32 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
       }
       ctx.lineTo(activeMarkerX, activeMarkerY);
       ctx.strokeStyle = '#facc15';
-      ctx.lineWidth = 1.5 * scale;
+      ctx.lineWidth = 1.6 * baseScale;
       ctx.stroke();
 
       // Glowing Leading Dot
       ctx.beginPath();
-      ctx.arc(activeMarkerX, activeMarkerY, 3.5 * scale, 0, Math.PI * 2);
+      ctx.arc(activeMarkerX, activeMarkerY, 3.8 * baseScale, 0, Math.PI * 2);
       ctx.fillStyle = '#ffffff';
       ctx.fill();
       ctx.strokeStyle = '#facc15';
-      ctx.lineWidth = 1.5 * scale;
+      ctx.lineWidth = 1.6 * baseScale;
       ctx.stroke();
 
       ctx.restore();
     },
-    [showHud, points, totalDistanceM, totalDistanceKm, minElevation, maxElevation, totalElevationGain, hudPosition, duration, totalDuration]
+    [
+      showHud,
+      points,
+      totalDistanceM,
+      totalDistanceKm,
+      minElevation,
+      maxElevation,
+      totalElevationGain,
+      hudPosition,
+      duration,
+      totalDuration,
+    ]
   );
 
   // Video Export Handler (WebCodecs MP4 1080p with 4s Outro Zoom-out)

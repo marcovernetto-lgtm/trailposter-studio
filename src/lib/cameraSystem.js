@@ -91,14 +91,44 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
   const getGuidePoint = (t) => guideCurve.getPointAt(Math.max(0, Math.min(t, 0.999)));
   const getGuideTangent = (t) => guideCurve.getTangentAt(Math.max(0, Math.min(t, 0.999))).normalize();
 
-  // Track centroid for orbit, overview and outro shots
+  // Sample track curve points to compute true centroid, bounding span and principal direction
+  const samplePts = [];
+  let minX = Infinity, maxX = -Infinity;
+  let minZ = Infinity, maxZ = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+  for (let s = 0; s <= 60; s++) {
+    const pt = trackCurve.getPointAt(s / 60);
+    samplePts.push(pt);
+    if (pt.x < minX) minX = pt.x;
+    if (pt.x > maxX) maxX = pt.x;
+    if (pt.z < minZ) minZ = pt.z;
+    if (pt.z > maxZ) maxZ = pt.z;
+    if (pt.y < minY) minY = pt.y;
+    if (pt.y > maxY) maxY = pt.y;
+  }
+  const centroid = new THREE.Vector3((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
+  const trackSpanX = maxX - minX;
+  const trackSpanZ = maxZ - minZ;
+  const trackSpan = Math.max(300, Math.sqrt(trackSpanX * trackSpanX + trackSpanZ * trackSpanZ));
+
   const startPt = getTrackPoint(0);
   const midPt = getTrackPoint(0.5);
   const endPt = getTrackPoint(0.999);
-  const centroid = new THREE.Vector3()
-    .addVectors(startPt, midPt)
-    .add(endPt)
-    .divideScalar(3);
+
+  let startToFinishVec = new THREE.Vector3(endPt.x - startPt.x, 0, endPt.z - startPt.z);
+  if (startToFinishVec.length() < 15) {
+    let maxDist = 0;
+    let furthestPt = midPt;
+    samplePts.forEach((p) => {
+      const d = startPt.distanceTo(p);
+      if (d > maxDist) {
+        maxDist = d;
+        furthestPt = p;
+      }
+    });
+    startToFinishVec = new THREE.Vector3(furthestPt.x - startPt.x, 0, furthestPt.z - startPt.z);
+  }
+  const dirFinish = startToFinishVec.clone().normalize();
 
   /**
    * Evaluates camera position and lookAt from user keyframes
@@ -160,7 +190,8 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
     progress,
     mode = 'drone',
     customKeyframes = [],
-    outroProgress = 0.0
+    outroProgress = 0.0,
+    isVertical = false
   ) => {
     const t = Math.max(0, Math.min(progress, 1.0));
 
@@ -190,73 +221,69 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
       lerpFactor = 0.035;
     }
 
-    // 2. VOLO D'AQUILA
+    // 2. VOLO D'AQUILA (High-Altitude Cinematic 45° Angle)
     else if (mode === 'eagle') {
-      const eagleHeight = 220;
-      const swayOffset = Math.sin(t * Math.PI * 2) * 90;
-      const perp = new THREE.Vector3(-guideTangent.z, 0, guideTangent.x).normalize();
+      const highDist = 280;
+      const highHeight = 160;
 
       desiredPosition
         .copy(guidePt)
-        .sub(guideTangent.clone().multiplyScalar(60))
-        .add(perp.multiplyScalar(swayOffset))
-        .add(new THREE.Vector3(0, eagleHeight, 0));
+        .sub(guideTangent.clone().multiplyScalar(highDist))
+        .add(new THREE.Vector3(0, highHeight, 0));
 
-      desiredLookAt.copy(currentTrackPt);
+      desiredLookAt.copy(getTrackPoint(Math.min(t + 0.08, 0.999)));
       lerpFactor = 0.025;
     }
 
-    // 3. ORBITA PANORAMICA
+    // 3. ORBITA PANORAMICA (Smooth 360° rotation around massif)
     else if (mode === 'orbit') {
-      const radius = 320;
-      const height = 180;
-      const angle = t * 2 * Math.PI - Math.PI / 2;
+      const orbitAngle = t * Math.PI * 2.2;
+      const orbitRadius = Math.max(380, trackSpan * 0.7);
+      const orbitHeight = Math.max(220, trackSpan * 0.45);
 
       desiredPosition.set(
-        centroid.x + radius * Math.cos(angle),
-        centroid.y + height,
-        centroid.z + radius * Math.sin(angle)
+        centroid.x + orbitRadius * Math.cos(orbitAngle),
+        centroid.y + orbitHeight,
+        centroid.z + orbitRadius * Math.sin(orbitAngle)
       );
 
-      desiredLookAt.copy(currentTrackPt).lerp(centroid, 0.5);
+      desiredLookAt.copy(currentTrackPt);
       lerpFactor = 0.04;
     }
 
-    // 4. REGIA MULTI-ANGOLO
+    // 4. REGIA MULTI-ANGOLO (Dynamic alternating focal lengths & angles)
     else if (mode === 'cinematic') {
-      if (t < 0.25) {
-        desiredPosition.copy(guidePt).add(new THREE.Vector3(120, 160, 80));
+      const shotIndex = Math.floor(t * 4);
+
+      if (shotIndex === 0) {
+        // High 3/4 front view
+        desiredPosition.copy(guidePt).add(new THREE.Vector3(120, 100, 120));
         desiredLookAt.copy(currentTrackPt);
-      } else if (t < 0.5) {
-        desiredPosition
-          .copy(guidePt)
-          .sub(guideTangent.clone().multiplyScalar(80))
-          .add(new THREE.Vector3(0, 35, 0));
-        desiredLookAt.copy(getTrackPoint(Math.min(t + 0.05, 0.999)));
-      } else if (t < 0.75) {
-        const angle = t * Math.PI * 2;
-        desiredPosition.set(
-          guidePt.x + 160 * Math.cos(angle),
-          guidePt.y + 110,
-          guidePt.z + 160 * Math.sin(angle)
-        );
+      } else if (shotIndex === 1) {
+        // Low lateral tracking shot
+        const sidePerp = new THREE.Vector3(-guideTangent.z, 0, guideTangent.x).multiplyScalar(90);
+        desiredPosition.copy(guidePt).add(sidePerp).add(new THREE.Vector3(0, 45, 0));
+        desiredLookAt.copy(currentTrackPt);
+      } else if (shotIndex === 2) {
+        // Top-down bird's eye view
+        desiredPosition.copy(currentTrackPt).add(new THREE.Vector3(0, 240, 20));
         desiredLookAt.copy(currentTrackPt);
       } else {
-        const pullProgress = (t - 0.75) / 0.25;
+        // Grand valley chase view
         desiredPosition
           .copy(guidePt)
-          .sub(guideTangent.clone().multiplyScalar(100 + pullProgress * 200))
-          .add(new THREE.Vector3(0, 70 + pullProgress * 200, 0));
-        desiredLookAt.copy(centroid);
+          .sub(guideTangent.clone().multiplyScalar(180))
+          .add(new THREE.Vector3(0, 90, 0));
+        desiredLookAt.copy(getTrackPoint(Math.min(t + 0.05, 0.999)));
       }
-      lerpFactor = 0.025;
+      lerpFactor = 0.03;
     }
 
     // 5. INTRO & OUTRO TOTALE
     else if (mode === 'overview') {
       if (t < 0.15) {
         const introT = t / 0.15;
-        const highOverview = new THREE.Vector3(centroid.x, centroid.y + 550, centroid.z + 200);
+        const highOverview = new THREE.Vector3(centroid.x, centroid.y + 600, centroid.z + 300);
         const lowChase = guidePt.clone().sub(guideTangent.clone().multiplyScalar(130)).add(new THREE.Vector3(0, 65, 0));
         desiredPosition.lerpVectors(highOverview, lowChase, introT * introT);
         desiredLookAt.lerpVectors(centroid, currentTrackPt, introT);
@@ -284,7 +311,7 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
       lerpFactor = 0.05;
     }
 
-    // 7. FINAL 7-SECOND CINEMATIC OUTRO ZOOM OUT (GRAND REVEAL)
+    // 7. FINAL 7-SECOND CINEMATIC OUTRO ZOOM OUT (START AT TOP, FINISH AT BOTTOM)
     if (outroProgress > 0) {
       const p = Math.max(0, Math.min(outroProgress, 1.0));
       const smoothP = p * p * (3 - 2 * p);
@@ -292,18 +319,39 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
       const finishPos = desiredPosition.clone();
       const finishLook = desiredLookAt.clone();
 
-      const outroAngle = Math.PI / 4 + p * 0.30;
-      const outroHeight = 720;
-      const outroDist = 520;
+      // Scale camera height and distance based on vertical vs horizontal format
+      const hScale = isVertical ? 1.65 : 1.25;
+      const dScale = isVertical ? 1.25 : 0.95;
+      const camHeight = Math.max(isVertical ? 880 : 720, trackSpan * hScale);
+      const camDist = Math.max(isVertical ? 650 : 520, trackSpan * dScale);
 
+      // Rotate slightly during 7s outro for subtle cinematic drift
+      const driftAngle = (p - 0.5) * (isVertical ? 0.06 : 0.12);
+      const cosD = Math.cos(driftAngle);
+      const sinD = Math.sin(driftAngle);
+
+      // Rotated direction from Start towards Finish
+      const driftedDir = new THREE.Vector3(
+        dirFinish.x * cosD - dirFinish.z * sinD,
+        0,
+        dirFinish.x * sinD + dirFinish.z * cosD
+      ).normalize();
+
+      // Camera sits behind Finish looking towards Centroid/Start
       const grandOverviewPos = new THREE.Vector3(
-        centroid.x + outroDist * Math.cos(outroAngle),
-        centroid.y + outroHeight,
-        centroid.z + outroDist * Math.sin(outroAngle)
+        centroid.x + driftedDir.x * camDist,
+        centroid.y + camHeight,
+        centroid.z + driftedDir.z * camDist
+      );
+
+      const grandOverviewLook = new THREE.Vector3(
+        centroid.x - driftedDir.x * (camDist * 0.10),
+        centroid.y,
+        centroid.z - driftedDir.z * (camDist * 0.10)
       );
 
       desiredPosition.lerpVectors(finishPos, grandOverviewPos, smoothP);
-      desiredLookAt.lerpVectors(finishLook, centroid, smoothP);
+      desiredLookAt.lerpVectors(finishLook, grandOverviewLook, smoothP);
       lerpFactor = 0.05;
     }
 
