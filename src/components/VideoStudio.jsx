@@ -1,10 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import {
   Video,
   Camera,
@@ -81,11 +77,9 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
   const [showHud, setShowHud] = useState(true);
   const [hudPosition, setHudPosition] = useState('top_left'); // 'top_left' | 'top_right' | 'bottom_left' | 'bottom_right'
 
-  // Depth of Field / Sfocatura di Profondità (DoF) Settings
-  const [enableDepthBlur, setEnableDepthBlur] = useState(true); // Sfocatura di profondità attiva di default
-  const [depthBlurStrength, setDepthBlurStrength] = useState('medium'); // 'soft' | 'medium' | 'heavy'
-  const composerRef = useRef(null);
-  const bokehPassRef = useRef(null);
+  // Sfocatura Territorio Distante (Profondità orizzonte perimetrale)
+  const [enableDistantBlur, setEnableDistantBlur] = useState(true); // Default: Attiva
+  const [distantBlurStrength, setDistantBlurStrength] = useState('medium'); // 'soft' | 'medium' | 'heavy'
 
   // Camera & Director Mode
   const [directorType, setDirectorType] = useState('auto'); // 'auto' | 'keyframe'
@@ -324,29 +318,14 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
       setPreviewProgress(0);
       setIsPreviewPlaying(false);
 
-      // Start continuous animation loop with real-time Depth-of-Field focus tracking
+      // Start continuous animation loop (Razor-sharp native 4K WebGL rendering)
       const animate = () => {
         animIdRef.current = requestAnimationFrame(animate);
         if (orbitControlsRef.current && isOrbitInteractingRef.current) {
           orbitControlsRef.current.update();
         }
         if (rendererRef.current && sceneDataRef.current) {
-          if (enableDepthBlur && composerRef.current && bokehPassRef.current) {
-            const cam = sceneDataRef.current.camera;
-            const athletePos = sceneDataRef.current.trackCurve.getPointAt(
-              Math.min(0.999, timeProgress.trailProgress)
-            );
-            const focalDist = cam.position.distanceTo(athletePos);
-            if (bokehPassRef.current.materialBokeh) {
-              bokehPassRef.current.materialBokeh.uniforms['focus'].value = focalDist;
-              bokehPassRef.current.materialBokeh.uniforms['aspect'].value = cam.aspect;
-              bokehPassRef.current.materialBokeh.uniforms['nearClip'].value = cam.near;
-              bokehPassRef.current.materialBokeh.uniforms['farClip'].value = cam.far;
-            }
-            composerRef.current.render();
-          } else {
-            rendererRef.current.render(sceneDataRef.current.scene, sceneDataRef.current.camera);
-          }
+          rendererRef.current.render(sceneDataRef.current.scene, sceneDataRef.current.camera);
         }
       };
       animate();
@@ -356,55 +335,14 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
     } finally {
       setIsBuilding(false);
     }
-  }, [points, heightExaggeration, trackColor, trackWidth, waypoints, aspectRatio, enableDepthBlur, timeProgress]);
+  }, [points, heightExaggeration, trackColor, trackWidth, waypoints, aspectRatio]);
 
-  // Setup / Update EffectComposer with Bokeh Depth of Field Pass
-  const updateComposer = useCallback(() => {
-    if (!rendererRef.current || !sceneDataRef.current) return;
-    const container = containerRef.current;
-    const width = container ? container.clientWidth || 800 : 800;
-    const height = container ? container.clientHeight || 500 : 500;
-
-    if (composerRef.current) {
-      composerRef.current.dispose();
-      composerRef.current = null;
-    }
-
-    if (!enableDepthBlur) {
-      bokehPassRef.current = null;
-      return;
-    }
-
-    const composer = new EffectComposer(rendererRef.current);
-    composer.setSize(width, height);
-
-    const renderPass = new RenderPass(sceneDataRef.current.scene, sceneDataRef.current.camera);
-    composer.addPass(renderPass);
-
-    const apertureVal =
-      depthBlurStrength === 'heavy' ? 0.034 : depthBlurStrength === 'soft' ? 0.012 : 0.020;
-    const maxblurVal =
-      depthBlurStrength === 'heavy' ? 0.018 : depthBlurStrength === 'soft' ? 0.007 : 0.012;
-
-    const bokehPass = new BokehPass(sceneDataRef.current.scene, sceneDataRef.current.camera, {
-      focus: 150.0,
-      aperture: apertureVal,
-      maxblur: maxblurVal,
-    });
-    composer.addPass(bokehPass);
-    bokehPassRef.current = bokehPass;
-
-    const outputPass = new OutputPass();
-    composer.addPass(outputPass);
-
-    composerRef.current = composer;
-  }, [enableDepthBlur, depthBlurStrength]);
-
+  // Sync distant blur on terrain scene in real-time
   useEffect(() => {
-    if (sceneReady) {
-      updateComposer();
+    if (sceneDataRef.current?.setDistantBlur) {
+      sceneDataRef.current.setDistantBlur(enableDistantBlur, distantBlurStrength);
     }
-  }, [sceneReady, updateComposer]);
+  }, [enableDistantBlur, distantBlurStrength]);
 
   // Initial load & trigger build on point/elevation/waypoints changes
   useEffect(() => {
@@ -414,7 +352,6 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
     return () => {
       if (animIdRef.current) cancelAnimationFrame(animIdRef.current);
       if (orbitControlsRef.current) orbitControlsRef.current.dispose();
-      if (composerRef.current) composerRef.current.dispose();
     };
   }, [points, heightExaggeration, trackColor, trackWidth, waypoints]);
 
@@ -431,9 +368,6 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
         rendererRef.current.setSize(w, h);
         sceneDataRef.current.camera.aspect = w / h;
         sceneDataRef.current.camera.updateProjectionMatrix();
-        if (composerRef.current) {
-          composerRef.current.setSize(w, h);
-        }
       }
     });
 
@@ -969,29 +903,6 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
     const [w, h] = aspectRatio === '9:16' ? [1080, 1920] : [1920, 1080];
     const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
 
-    let exportComposer = null;
-    let exportBokehPass = null;
-    if (enableDepthBlur) {
-      exportComposer = new EffectComposer(rendererRef.current);
-      exportComposer.setSize(w, h);
-      const renderPass = new RenderPass(sceneDataRef.current.scene, sceneDataRef.current.camera);
-      exportComposer.addPass(renderPass);
-
-      const apertureVal =
-        depthBlurStrength === 'heavy' ? 0.034 : depthBlurStrength === 'soft' ? 0.012 : 0.020;
-      const maxblurVal =
-        depthBlurStrength === 'heavy' ? 0.018 : depthBlurStrength === 'soft' ? 0.007 : 0.012;
-
-      exportBokehPass = new BokehPass(sceneDataRef.current.scene, sceneDataRef.current.camera, {
-        focus: 150.0,
-        aperture: apertureVal,
-        maxblur: maxblurVal,
-      });
-      exportComposer.addPass(exportBokehPass);
-      const outputPass = new OutputPass();
-      exportComposer.addPass(outputPass);
-    }
-
     try {
       const blobUrl = await exportVideo({
         renderer: rendererRef.current,
@@ -1019,23 +930,6 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
             aspectRatio === '9:16'
           );
         },
-        renderFrame: (rend, scn, cam, overallProgress) => {
-          if (exportComposer && exportBokehPass) {
-            const elapsed = overallProgress * totalDuration;
-            const tp = elapsed <= duration ? elapsed / duration : 1.0;
-            const athletePos = sceneDataRef.current.trackCurve.getPointAt(Math.min(0.999, tp));
-            const focalDist = cam.position.distanceTo(athletePos);
-            if (exportBokehPass.materialBokeh) {
-              exportBokehPass.materialBokeh.uniforms['focus'].value = focalDist;
-              exportBokehPass.materialBokeh.uniforms['aspect'].value = cam.aspect;
-              exportBokehPass.materialBokeh.uniforms['nearClip'].value = cam.near;
-              exportBokehPass.materialBokeh.uniforms['farClip'].value = cam.far;
-            }
-            exportComposer.render();
-          } else {
-            rend.render(scn, cam);
-          }
-        },
         drawOverlay: showHud ? (ctx, vw, vh, p) => drawHudOnVideo(ctx, vw, vh, p) : null,
         options: {
           width: w,
@@ -1057,9 +951,6 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
       setExportError(err.message || 'Errore durante la generazione del video');
     } finally {
       setIsExporting(false);
-      if (exportComposer) {
-        exportComposer.dispose();
-      }
       // Restore renderer viewport
       if (rendererRef.current && containerRef.current) {
         const cw = containerRef.current.clientWidth;
@@ -1068,9 +959,6 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
         if (sceneDataRef.current) {
           sceneDataRef.current.camera.aspect = cw / ch;
           sceneDataRef.current.camera.updateProjectionMatrix();
-        }
-        if (composerRef.current) {
-          composerRef.current.setSize(cw, ch);
         }
       }
     }
@@ -1556,49 +1444,49 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
           )}
         </div>
 
-        {/* Card 6: Profondità di Campo & Sfocatura Lontana (DoF Bokeh) */}
+        {/* Card 6: Sfocatura Territorio Distante (Profondità & Orizzonte non 4K) */}
         <div className="glass-card p-3 rounded-2xl border border-white/10 space-y-2 bg-[#181a20]/95 shadow-md">
           <div className="flex items-center justify-between border-b border-white/5 pb-1.5">
             <div className="flex items-center gap-2">
               <Focus className="w-4 h-4 text-teal-400" />
               <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-200">
-                Profondità di Campo (DoF)
+                Sfocatura Parti Lontane
               </h3>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
                 type="checkbox"
-                checked={enableDepthBlur}
-                onChange={(e) => setEnableDepthBlur(e.target.checked)}
+                checked={enableDistantBlur}
+                onChange={(e) => setEnableDistantBlur(e.target.checked)}
                 className="sr-only peer"
               />
               <div className="w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-teal-600"></div>
             </label>
           </div>
 
-          {enableDepthBlur && (
+          {enableDistantBlur && (
             <div className="space-y-1.5 pt-0.5">
               <div className="flex items-center justify-between text-[11px]">
-                <span className="text-neutral-400">Sfocatura Orizzonte & Quinte</span>
+                <span className="text-neutral-400">Sfocatura Orizzonte e Quinte</span>
                 <span className="text-teal-300 font-mono font-bold text-[10px] uppercase">
-                  {depthBlurStrength === 'soft'
+                  {distantBlurStrength === 'soft'
                     ? 'Morbida'
-                    : depthBlurStrength === 'heavy'
+                    : distantBlurStrength === 'heavy'
                     ? 'Intensa'
-                    : 'Cinematica'}
+                    : 'Media'}
                 </span>
               </div>
               <div className="grid grid-cols-3 gap-1 text-[11px]">
                 {[
                   { id: 'soft', label: 'Morbida' },
-                  { id: 'medium', label: 'Cinematica' },
+                  { id: 'medium', label: 'Media' },
                   { id: 'heavy', label: 'Intensa' },
                 ].map((s) => (
                   <button
                     key={s.id}
-                    onClick={() => setDepthBlurStrength(s.id)}
+                    onClick={() => setDistantBlurStrength(s.id)}
                     className={`py-1 rounded-lg border font-semibold transition-all text-center ${
-                      depthBlurStrength === s.id
+                      distantBlurStrength === s.id
                         ? 'border-teal-500 bg-teal-500/20 text-teal-300 font-bold'
                         : 'border-white/10 bg-white/5 text-neutral-400 hover:text-white'
                     }`}

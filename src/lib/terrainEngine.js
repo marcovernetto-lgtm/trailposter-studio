@@ -583,24 +583,38 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   skirtGeom.computeVertexNormals();
 
   const skirtCanvas = document.createElement('canvas');
-  skirtCanvas.width = 256;
-  skirtCanvas.height = 256;
+  skirtCanvas.width = 512;
+  skirtCanvas.height = 512;
   const skirtCtx = skirtCanvas.getContext('2d');
-
-  skirtCtx.filter = 'blur(6px)';
-  skirtCtx.drawImage(mapCanvas, 0, 0, 256, 256);
-  skirtCtx.filter = 'none';
-
-  const hazeGrad = skirtCtx.createRadialGradient(128, 128, 60, 128, 128, 140);
-  hazeGrad.addColorStop(0, 'rgba(12, 16, 23, 0.0)');
-  hazeGrad.addColorStop(1, 'rgba(12, 16, 23, 0.75)');
-  skirtCtx.fillStyle = hazeGrad;
-  skirtCtx.fillRect(0, 0, 256, 256);
 
   const skirtTexture = new THREE.CanvasTexture(skirtCanvas);
   skirtTexture.colorSpace = THREE.SRGBColorSpace;
   skirtTexture.minFilter = THREE.LinearFilter;
   skirtTexture.magFilter = THREE.LinearFilter;
+
+  const renderSkirtTexture = (blurred = true, blurPx = 8) => {
+    skirtCtx.clearRect(0, 0, 512, 512);
+    if (blurred) {
+      skirtCtx.filter = `blur(${blurPx}px)`;
+    } else {
+      skirtCtx.filter = 'none';
+    }
+    skirtCtx.drawImage(mapCanvas, 0, 0, 512, 512);
+    skirtCtx.filter = 'none';
+
+    // Distant aerial perspective & subtle mountain haze on outer horizon
+    const hazeGrad = skirtCtx.createRadialGradient(256, 256, 120, 256, 256, 260);
+    hazeGrad.addColorStop(0, 'rgba(12, 16, 23, 0.0)');
+    hazeGrad.addColorStop(1, 'rgba(12, 16, 23, 0.70)');
+    skirtCtx.fillStyle = hazeGrad;
+    skirtCtx.fillRect(0, 0, 512, 512);
+
+    skirtTexture.needsUpdate = true;
+  };
+
+  const initialStrength = config.distantBlurStrength || 'medium';
+  const initialBlurPx = initialStrength === 'heavy' ? 14 : initialStrength === 'soft' ? 4 : 8;
+  renderSkirtTexture(config.distantBlur !== false, initialBlurPx);
 
   const skirtMaterial = new THREE.MeshStandardMaterial({
     map: skirtTexture,
@@ -838,6 +852,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
       spanKm: totalSpanM / 1000,
     },
     updateProgress,
+    setDistantBlur,
     dispose,
   };
 }
