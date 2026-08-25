@@ -638,6 +638,19 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
     }
   };
 
+  // Aspect Ratio change with automatic video reset and memory cleanup
+  const handleSetAspectRatio = (ratio) => {
+    if (ratio === aspectRatio) return;
+    setAspectRatio(ratio);
+    if (exportedUrl) {
+      URL.revokeObjectURL(exportedUrl);
+      setExportedUrl(null);
+    }
+    setExportError(null);
+    setExportProgress(0);
+    setExportMessage('');
+  };
+
   // Play / Pause Toggle
   const togglePlay = () => {
     if (isPreviewPlaying) {
@@ -1320,10 +1333,10 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
 
           <div className="grid grid-cols-2 gap-1.5">
             <button
-              onClick={() => setAspectRatio('16:9')}
+              onClick={() => handleSetAspectRatio('16:9')}
               className={`flex items-center justify-center gap-1.5 p-1.5 rounded-xl text-xs font-semibold transition-all border ${
                 aspectRatio === '16:9'
-                  ? 'border-teal-500 bg-teal-500/20 text-teal-300'
+                  ? 'border-teal-500 bg-teal-500/20 text-teal-300 font-bold'
                   : 'border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10'
               }`}
             >
@@ -1331,10 +1344,10 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
               16:9 Orizzontale
             </button>
             <button
-              onClick={() => setAspectRatio('9:16')}
+              onClick={() => handleSetAspectRatio('9:16')}
               className={`flex items-center justify-center gap-1.5 p-1.5 rounded-xl text-xs font-semibold transition-all border ${
                 aspectRatio === '9:16'
-                  ? 'border-teal-500 bg-teal-500/20 text-teal-300'
+                  ? 'border-teal-500 bg-teal-500/20 text-teal-300 font-bold'
                   : 'border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10'
               }`}
             >
@@ -1460,6 +1473,16 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
                 <Download className="w-4 h-4" />
                 Scarica Video MP4 (1080p)
               </button>
+              <button
+                onClick={() => {
+                  URL.revokeObjectURL(exportedUrl);
+                  setExportedUrl(null);
+                }}
+                className="w-full flex items-center justify-center gap-1.5 p-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-neutral-300 text-xs transition-all hover:text-white"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Rigenera nuovo video</span>
+              </button>
             </div>
           )}
 
@@ -1477,7 +1500,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
       </div>
 
       {/* Central 3D Interactive Viewport (Right - 8 Cols on LG) */}
-      <div className="lg:col-span-8 flex flex-col items-center justify-center glass-panel rounded-2xl min-h-[calc(100vh-100px)] border border-white/10 relative overflow-hidden bg-[#0c1017]">
+      <div className="lg:col-span-8 flex flex-col items-center justify-center glass-panel rounded-2xl min-h-[calc(100vh-100px)] border border-white/10 relative overflow-hidden bg-[#0c1017] p-2">
         {/* Top Floating Status Bar */}
         <div className="absolute top-4 left-4 right-4 z-10 flex items-center justify-between pointer-events-none">
           <div className="glass-panel-subtle px-3 py-1 rounded-full border border-white/10 pointer-events-auto flex items-center gap-2">
@@ -1488,6 +1511,9 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
                 : directorType === 'keyframe'
                 ? `Regia Keyframe (${keyframes.length} scene)`
                 : `Regia • ${CAMERA_MODES[cameraMode]?.name}`}
+            </span>
+            <span className="text-[10px] bg-white/10 text-teal-300 font-mono font-bold px-1.5 py-0.5 rounded">
+              {aspectRatio}
             </span>
           </div>
 
@@ -1511,105 +1537,6 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
             </div>
           )}
         </div>
-
-        {/* Minimal & Light Progressive Telemetry HUD Card Overlay (Positioned top_left by default) */}
-        {showHud && sceneReady && !isBuilding && points.length > 1 && (
-          <div
-            className={`absolute z-20 pointer-events-none transition-all duration-300 ${
-              hudPosition === 'bottom_left'
-                ? 'bottom-20 left-4'
-                : hudPosition === 'bottom_right'
-                ? 'bottom-20 right-4'
-                : hudPosition === 'top_left'
-                ? 'top-14 left-4'
-                : 'top-14 right-4'
-            }`}
-          >
-            <div className="w-72 backdrop-blur-xl bg-black/45 border border-white/15 rounded-2xl shadow-2xl p-3 space-y-1.5 pointer-events-auto relative overflow-hidden">
-              {/* Subtle Glass Specular Highlight */}
-              <div className="absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-white/10 to-transparent pointer-events-none rounded-t-2xl" />
-
-              {/* Row 1: Realtime Live Metrics (Clean & Minimal) */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-base font-extrabold text-white font-mono tracking-tight">
-                      {currentTelemetry.distKm}
-                    </span>
-                    <span className="text-[10px] text-neutral-400 font-medium">/ {totalDistanceKm} km</span>
-                  </div>
-                  <p className="text-[10px] text-amber-300 font-medium flex items-center gap-1">
-                    <TrendingUp className="w-3 h-3 text-amber-400" />
-                    +{currentTelemetry.gainM}m D+
-                  </p>
-                </div>
-
-                <div className="text-right">
-                  {timeProgress.isOutro ? (
-                    <div className="flex items-center gap-1 text-amber-300 font-bold text-xs">
-                      <Award className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Arrivo</span>
-                    </div>
-                  ) : (
-                    <span className="text-sm font-bold text-amber-300 font-mono">
-                      {currentTelemetry.eleM} m
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Row 2: Progressive Dynamic Elevation Profile Chart */}
-              <div className="relative h-10 w-full overflow-hidden pt-1">
-                <svg className="w-full h-full" viewBox="0 0 100 36" preserveAspectRatio="none">
-                  <defs>
-                    <linearGradient id="hudActiveAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#facc15" stopOpacity="0.4" />
-                      <stop offset="100%" stopColor="#facc15" stopOpacity="0.02" />
-                    </linearGradient>
-                  </defs>
-
-                  {(() => {
-                    const spanE = Math.max(30, maxElevation - minElevation);
-
-                    // A. Full Ghost Trail Line
-                    const fullPoints = points.map((p) => {
-                      const x = (p.cumDistance / totalDistanceM) * 100;
-                      const y = 32 - ((p.ele - minElevation) / spanE) * 26;
-                      return `${x.toFixed(1)},${y.toFixed(1)}`;
-                    });
-                    const ghostLineD = `M ${fullPoints.join(' L ')}`;
-
-                    // B. Progressive Active Section
-                    const ptIdx = currentTelemetry.ptIndex;
-                    const curX = timeProgress.trailProgress * 100;
-                    const curY = 32 - ((currentTelemetry.eleM - minElevation) / spanE) * 26;
-
-                    const activePoints = [];
-                    for (let i = 0; i <= ptIdx; i++) {
-                      const p = points[i];
-                      const px = (p.cumDistance / totalDistanceM) * 100;
-                      const py = 32 - ((p.ele - minElevation) / spanE) * 26;
-                      activePoints.push(`${px.toFixed(1)},${py.toFixed(1)}`);
-                    }
-                    activePoints.push(`${curX.toFixed(1)},${curY.toFixed(1)}`);
-
-                    const activeAreaD = `M 0,34 L ${activePoints.join(' L ')} L ${curX.toFixed(1)},34 Z`;
-                    const activeLineD = `M ${activePoints.join(' L ')}`;
-
-                    return (
-                      <>
-                        <path d={ghostLineD} fill="none" stroke="rgba(255, 255, 255, 0.12)" strokeWidth="1.0" />
-                        <path d={activeAreaD} fill="url(#hudActiveAreaGrad)" />
-                        <path d={activeLineD} fill="none" stroke="#facc15" strokeWidth="1.4" />
-                        <circle cx={curX} cy={curY} r="2.2" fill="#ffffff" stroke="#facc15" strokeWidth="1.2" />
-                      </>
-                    );
-                  })()}
-                </svg>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Loading Overlay */}
         {isBuilding && (
@@ -1675,11 +1602,131 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
           </div>
         )}
 
-        {/* 3D WebGL Canvas Container */}
+        {/* Dynamic Aspect Ratio Preview Canvas Frame (16:9 vs 9:16) */}
         <div
-          ref={containerRef}
-          className="w-full h-[calc(100vh-140px)] min-h-[500px] cursor-grab active:cursor-grabbing flex items-center justify-center"
-        />
+          className={`relative flex items-center justify-center transition-all duration-300 ${
+            aspectRatio === '9:16'
+              ? 'h-[calc(100vh-160px)] max-h-[660px] aspect-[9/16] rounded-3xl border-2 border-white/20 shadow-2xl overflow-hidden my-auto bg-black ring-1 ring-teal-500/20'
+              : 'w-full h-[calc(100vh-140px)] min-h-[500px]'
+          }`}
+        >
+          {/* 3D WebGL Canvas Container */}
+          <div
+            ref={containerRef}
+            className="w-full h-full cursor-grab active:cursor-grabbing flex items-center justify-center"
+          />
+
+          {/* Minimal & Light Progressive Telemetry HUD Card Overlay inside the active viewport */}
+          {showHud && sceneReady && !isBuilding && points.length > 1 && (
+            <div
+              className={`absolute z-20 pointer-events-none transition-all duration-300 ${
+                hudPosition === 'bottom_left'
+                  ? 'bottom-20 left-4'
+                  : hudPosition === 'bottom_right'
+                  ? 'bottom-20 right-4'
+                  : hudPosition === 'top_left'
+                  ? 'top-4 left-4'
+                  : 'top-4 right-4'
+              }`}
+            >
+              <div
+                className={`${
+                  aspectRatio === '9:16' ? 'w-56 p-2.5 space-y-1' : 'w-72 p-3 space-y-1.5'
+                } backdrop-blur-xl bg-black/55 border border-white/15 rounded-2xl shadow-2xl pointer-events-auto relative overflow-hidden`}
+              >
+                {/* Subtle Glass Specular Highlight */}
+                <div className="absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-white/10 to-transparent pointer-events-none rounded-t-2xl" />
+
+                {/* Row 1: Realtime Live Metrics (Clean & Minimal) */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-baseline gap-1">
+                      <span
+                        className={`${
+                          aspectRatio === '9:16' ? 'text-sm' : 'text-base'
+                        } font-extrabold text-white font-mono tracking-tight`}
+                      >
+                        {currentTelemetry.distKm}
+                      </span>
+                      <span className="text-[10px] text-neutral-400 font-medium">/ {totalDistanceKm} km</span>
+                    </div>
+                    <p className="text-[10px] text-amber-300 font-medium flex items-center gap-1">
+                      <TrendingUp className="w-3 h-3 text-amber-400" />
+                      +{currentTelemetry.gainM}m D+
+                    </p>
+                  </div>
+
+                  <div className="text-right">
+                    {timeProgress.isOutro ? (
+                      <div className="flex items-center gap-1 text-amber-300 font-bold text-xs">
+                        <Award className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Arrivo</span>
+                      </div>
+                    ) : (
+                      <span
+                        className={`${
+                          aspectRatio === '9:16' ? 'text-xs' : 'text-sm'
+                        } font-bold text-amber-300 font-mono`}
+                      >
+                        {currentTelemetry.eleM} m
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Row 2: Progressive Dynamic Elevation Profile Chart */}
+                <div className="relative h-10 w-full overflow-hidden pt-1">
+                  <svg className="w-full h-full" viewBox="0 0 100 36" preserveAspectRatio="none">
+                    <defs>
+                      <linearGradient id="hudActiveAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#facc15" stopOpacity="0.4" />
+                        <stop offset="100%" stopColor="#facc15" stopOpacity="0.02" />
+                      </linearGradient>
+                    </defs>
+
+                    {(() => {
+                      const spanE = Math.max(30, maxElevation - minElevation);
+
+                      // A. Full Ghost Trail Line
+                      const fullPoints = points.map((p) => {
+                        const x = (p.cumDistance / totalDistanceM) * 100;
+                        const y = 32 - ((p.ele - minElevation) / spanE) * 26;
+                        return `${x.toFixed(1)},${y.toFixed(1)}`;
+                      });
+                      const ghostLineD = `M ${fullPoints.join(' L ')}`;
+
+                      // B. Progressive Active Section
+                      const ptIdx = currentTelemetry.ptIndex;
+                      const curX = timeProgress.trailProgress * 100;
+                      const curY = 32 - ((currentTelemetry.eleM - minElevation) / spanE) * 26;
+
+                      const activePoints = [];
+                      for (let i = 0; i <= ptIdx; i++) {
+                        const p = points[i];
+                        const px = (p.cumDistance / totalDistanceM) * 100;
+                        const py = 32 - ((p.ele - minElevation) / spanE) * 26;
+                        activePoints.push(`${px.toFixed(1)},${py.toFixed(1)}`);
+                      }
+                      activePoints.push(`${curX.toFixed(1)},${curY.toFixed(1)}`);
+
+                      const activeAreaD = `M 0,34 L ${activePoints.join(' L ')} L ${curX.toFixed(1)},34 Z`;
+                      const activeLineD = `M ${activePoints.join(' L ')}`;
+
+                      return (
+                        <>
+                          <path d={ghostLineD} fill="none" stroke="rgba(255, 255, 255, 0.12)" strokeWidth="1.0" />
+                          <path d={activeAreaD} fill="url(#hudActiveAreaGrad)" />
+                          <path d={activeLineD} fill="none" stroke="#facc15" strokeWidth="1.4" />
+                          <circle cx={curX} cy={curY} r="2.2" fill="#ffffff" stroke="#facc15" strokeWidth="1.2" />
+                        </>
+                      );
+                    })()}
+                  </svg>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Bottom Playback & Scrubber Controls */}
         {sceneReady && !isBuilding && (
