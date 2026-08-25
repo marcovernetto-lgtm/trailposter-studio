@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { PosterCanvas } from './components/PosterCanvas';
-import { ThreeCanvas } from './components/ThreeCanvas';
 import { ProjectsModal } from './components/ProjectsModal';
 import { parseGPX } from './lib/gpxParser';
 import { exportPoster } from './lib/exportPoster';
@@ -84,7 +83,6 @@ export function App() {
     return draft?.config ? { ...DEFAULT_CONFIG, ...draft.config } : DEFAULT_CONFIG;
   });
 
-  const [viewMode, setViewMode] = useState('poster'); // 'poster' | '3d'
   const [isExporting, setIsExporting] = useState(false);
   const [projectsModalOpen, setProjectsModalOpen] = useState(false);
   const [savedProjectsCount, setSavedProjectsCount] = useState(0);
@@ -96,7 +94,7 @@ export function App() {
   useEffect(() => {
     document.title = config.title
       ? `${config.title} - TrailPoster Studio`
-      : 'TrailPoster Studio - Generatore Poster GPX & Modelli 3D';
+      : 'TrailPoster Studio - Generatore Poster GPX';
   }, [config.title]);
 
   // Sync Saved Projects count
@@ -179,53 +177,40 @@ export function App() {
         onQuickSave={handleQuickSave}
         isInstallable={isInstallable}
         onInstallPwa={installApp}
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
       />
 
       {/* Main Studio Container */}
-      <main className="flex-1 max-w-[1700px] w-full mx-auto p-4 sm:p-6">
-        {viewMode === 'poster' ? (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* Sidebar Controls (Left - 4 Cols on LG) */}
-            <div className="lg:col-span-4 h-[calc(100vh-100px)] sticky top-20">
-              <Sidebar
-                trackData={trackData}
-                config={config}
-                setConfig={setConfig}
-                onGpxUpload={handleGpxUpload}
-              />
-            </div>
-
-            {/* Central Live Preview Poster Canvas (Right - 8 Cols on LG) */}
-            <div className="lg:col-span-8 flex flex-col items-center justify-center p-2 sm:p-6 glass-panel rounded-2xl min-h-[calc(100vh-100px)] border border-white/10 relative overflow-hidden bg-[#181a20]/80">
-              {/* Subtle Ambient Background Lighting */}
-              <div className="absolute -top-40 -right-40 w-96 h-96 bg-teal-500/5 rounded-full blur-3xl pointer-events-none" />
-              <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
-
-              {/* Canvas Header Subtitle */}
-              <div className="mb-4 text-center">
-                <span className="text-xs font-mono tracking-widest text-neutral-400 uppercase bg-neutral-900/80 px-3 py-1 rounded-full border border-white/5">
-                  Live Preview • {config.orientation === 'landscape' ? '7:5 (70×50 CM Orizzontale)' : '5:7 (50×70 CM Verticale)'}
-                </span>
-              </div>
-
-              {/* Poster Component */}
-              <PosterCanvas
-                trackData={trackData}
-                config={config}
-                canvasRef={canvasRef}
-              />
-            </div>
-          </div>
-        ) : (
-          /* 3D Printable Model Studio */
-          <ThreeCanvas
+      <main className="flex-1 max-w-[1700px] w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Sidebar Controls (Left - 4 Cols on LG) */}
+        <div className="lg:col-span-4 h-[calc(100vh-100px)] sticky top-20">
+          <Sidebar
             trackData={trackData}
             config={config}
+            setConfig={setConfig}
             onGpxUpload={handleGpxUpload}
           />
-        )}
+        </div>
+
+        {/* Central Live Preview Poster Canvas (Right - 8 Cols on LG) */}
+        <div className="lg:col-span-8 flex flex-col items-center justify-center p-2 sm:p-6 glass-panel rounded-2xl min-h-[calc(100vh-100px)] border border-white/10 relative overflow-hidden bg-[#181a20]/80">
+          {/* Subtle Ambient Background Lighting */}
+          <div className="absolute -top-40 -right-40 w-96 h-96 bg-teal-500/5 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
+
+          {/* Canvas Header Subtitle */}
+          <div className="mb-4 text-center">
+            <span className="text-xs font-mono tracking-widest text-neutral-400 uppercase bg-neutral-900/80 px-3 py-1 rounded-full border border-white/5">
+              Live Preview • {config.orientation === 'landscape' ? '7:5 (70×50 CM Orizzontale)' : '5:7 (50×70 CM Verticale)'}
+            </span>
+          </div>
+
+          {/* Poster Component */}
+          <PosterCanvas
+            trackData={trackData}
+            config={config}
+            canvasRef={canvasRef}
+          />
+        </div>
       </main>
 
       {/* Saved Projects Gallery Modal */}
