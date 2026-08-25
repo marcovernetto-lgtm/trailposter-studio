@@ -14,7 +14,7 @@ import {
 } from './lib/projectStorage';
 import { usePwaInstall } from './hooks/usePwaInstall';
 
-const DEFAULT_CONFIG = {
+export const DEFAULT_CONFIG = {
   title: 'IL TUO PERCORSO',
   subtitle: 'Data o Sottotitolo',
   details: 'Distanza • Giorni • Dislivello',
@@ -141,7 +141,7 @@ export function App() {
     setConfig({ ...DEFAULT_CONFIG, ...(project.config || {}) });
   };
 
-  // New Project Reset
+  // Create New Empty Project
   const handleNewProject = () => {
     setTrackData(null);
     setConfig(DEFAULT_CONFIG);
@@ -188,7 +188,7 @@ export function App() {
         {viewMode === 'poster' ? (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Sidebar Controls (Left - 4 Cols on LG) */}
-            <div className="lg:col-span-4 h-[calc(100vh-100px)] sticky top-20">
+            <div className="lg:col-span-4 h-[calc(100vh-100px)] sticky top-20 flex flex-col">
               <Sidebar
                 trackData={trackData}
                 config={config}
@@ -223,6 +223,7 @@ export function App() {
           <VideoStudio
             trackData={trackData}
             config={config}
+            setConfig={setConfig}
             onGpxUpload={handleGpxUpload}
           />
         )}

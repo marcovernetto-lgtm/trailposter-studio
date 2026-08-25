@@ -1,50 +1,44 @@
 import * as THREE from 'three';
 
 /**
- * Camera mode definitions
+ * Camera mode definitions (clean, minimal, professional)
  */
 export const CAMERA_MODES = {
   drone: {
     id: 'drone',
     name: 'Drone Cinematico',
     description: 'Volo morbido che segue il percorso con inclinazione cinematografica',
-    icon: '🚁',
+    iconType: 'drone',
   },
   eagle: {
     id: 'eagle',
     name: 'Volo d\'Aquila',
     description: 'Ampia panoramica aerea ad alta quota con vista a 45°',
-    icon: '🦅',
+    iconType: 'eagle',
   },
   orbit: {
     id: 'orbit',
     name: 'Orbita Panoramica',
     description: 'Rotazione continua a 360° attorno all\'intero massiccio',
-    icon: '🌍',
-  },
-  firstPerson: {
-    id: 'firstPerson',
-    name: 'Prospettiva Atleta',
-    description: 'Visuale ravvicinata e dinamica lungo la traccia',
-    icon: '👁️',
+    iconType: 'orbit',
   },
   cinematic: {
     id: 'cinematic',
     name: 'Regia Multi-Angolo',
     description: 'Alterna inquadrature aeree ampie e scorci ravvicinati',
-    icon: '🎬',
+    iconType: 'cinematic',
   },
   overview: {
     id: 'overview',
     name: 'Intro & Outro Totale',
     description: 'Zoom dall\'alto verso la partenza, segue e panoramica finale',
-    icon: '🗺️',
+    iconType: 'overview',
   },
   keyframe: {
     id: 'keyframe',
-    name: 'Regia Manuale (Keyframe)',
+    name: 'Regia Manuale',
     description: 'Controllata dai tuoi punti chiave personalizzati sulla timeline',
-    icon: '✨',
+    iconType: 'keyframe',
   },
 };
 
@@ -178,7 +172,7 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
     const guidePt = getGuidePoint(t);
     const guideTangent = getGuideTangent(t);
 
-    // 1. DRONE CINEMATICO (Ultra-smooth chase with wide lookahead)
+    // 1. DRONE CINEMATICO
     if (mode === 'drone') {
       const followDist = 140;
       const heightOffset = 65;
@@ -196,7 +190,7 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
       lerpFactor = 0.035;
     }
 
-    // 2. VOLO D'AQUILA (High-altitude sweeping vista)
+    // 2. VOLO D'AQUILA
     else if (mode === 'eagle') {
       const eagleHeight = 220;
       const swayOffset = Math.sin(t * Math.PI * 2) * 90;
@@ -212,7 +206,7 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
       lerpFactor = 0.025;
     }
 
-    // 3. ORBITA PANORAMICA (Smooth 360° rotation around massif)
+    // 3. ORBITA PANORAMICA
     else if (mode === 'orbit') {
       const radius = 320;
       const height = 180;
@@ -228,17 +222,7 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
       lerpFactor = 0.04;
     }
 
-    // 4. PROSPETTIVA ATLETA (Smooth first-person POV)
-    else if (mode === 'firstPerson') {
-      const lookAheadT = Math.min(t + 0.04, 0.999);
-      const lookTarget = getTrackPoint(lookAheadT);
-
-      desiredPosition.copy(currentTrackPt).add(new THREE.Vector3(0, 12, 0));
-      desiredLookAt.copy(lookTarget).add(new THREE.Vector3(0, 10, 0));
-      lerpFactor = 0.08;
-    }
-
-    // 5. REGIA MULTI-ANGOLO (Cinematic sequence with soft blended cuts)
+    // 4. REGIA MULTI-ANGOLO
     else if (mode === 'cinematic') {
       if (t < 0.25) {
         desiredPosition.copy(guidePt).add(new THREE.Vector3(120, 160, 80));
@@ -268,7 +252,7 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
       lerpFactor = 0.025;
     }
 
-    // 6. INTRO & OUTRO TOTALE
+    // 5. INTRO & OUTRO TOTALE
     else if (mode === 'overview') {
       if (t < 0.15) {
         const introT = t / 0.15;
@@ -292,7 +276,7 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
       lerpFactor = 0.03;
     }
 
-    // 7. REGIA MANUALE CON KEYFRAME (User custom keyframes)
+    // 6. REGIA MANUALE CON KEYFRAME
     else if (mode === 'keyframe') {
       const kfResult = evaluateKeyframes(t, customKeyframes);
       desiredPosition.copy(kfResult.position);
@@ -300,18 +284,15 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
       lerpFactor = 0.05;
     }
 
-    // 8. FINAL 4-SECOND CINEMATIC OUTRO ZOOM OUT (Reveals the entire completed trail)
+    // 7. FINAL 4-SECOND CINEMATIC OUTRO ZOOM OUT
     if (outroProgress > 0) {
       const p = Math.max(0, Math.min(outroProgress, 1.0));
-      // Smooth cubic Hermite easeInOut curve
       const smoothP = p * p * (3 - 2 * p);
 
-      // Save finish position before outro
       const finishPos = desiredPosition.clone();
       const finishLook = desiredLookAt.clone();
 
-      // Epic high-altitude overview position overlooking the entire massif
-      const outroAngle = Math.PI / 4 + p * 0.15; // Gentle majestic drift
+      const outroAngle = Math.PI / 4 + p * 0.15;
       const outroHeight = 650;
       const outroDist = 450;
 
@@ -326,7 +307,7 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
       lerpFactor = 0.06;
     }
 
-    // Apply smooth exponential damping to eliminate all jitter
+    // Apply smooth exponential damping
     if (!state.initialized || (t === 0 && outroProgress === 0)) {
       state.currentPosition.copy(desiredPosition);
       state.currentLookAt.copy(desiredLookAt);

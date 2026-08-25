@@ -9,7 +9,6 @@ export const MAP_STYLES = {
   satellite: {
     id: 'satellite',
     name: 'Satellite HD Max',
-    icon: '🛰️',
     description: 'Immagini aeree e satellitari ad altissima risoluzione Esri / Maxar',
     getTileUrl: (z, x, y) =>
       `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
@@ -87,6 +86,72 @@ async function asyncPool(poolLimit, array, iteratorFn) {
 }
 
 /**
+ * Creates a clean, minimal 2D canvas texture for a 3D waypoint placard / sign
+ */
+function createWaypointPlacardTexture(name, index = 1) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 384;
+  canvas.height = 96;
+  const ctx = canvas.getContext('2d');
+
+  // Background rounded pill
+  const r = 24;
+  const x = 8;
+  const y = 8;
+  const w = canvas.width - 16;
+  const h = canvas.height - 16;
+
+  ctx.fillStyle = 'rgba(10, 14, 20, 0.88)';
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+  ctx.lineWidth = 3;
+
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Index Badge
+  ctx.fillStyle = '#14b8a6';
+  ctx.beginPath();
+  ctx.arc(x + 36, y + h / 2, 18, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 20px "Outfit", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`${index}`, x + 36, y + h / 2);
+
+  // Placard Text
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 24px "Outfit", sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+
+  // Truncate text if too long
+  let displayText = name || `Tappa ${index}`;
+  if (displayText.length > 18) {
+    displayText = displayText.substring(0, 17) + '…';
+  }
+  ctx.fillText(displayText, x + 68, y + h / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  return texture;
+}
+
+/**
  * Builds a flat 3D ribbon geometry that is strictly clamped to the ground terrain
  * at EVERY vertex so it can NEVER sink into or get hidden by mountains!
  */
@@ -103,7 +168,7 @@ function createConformalFlatRibbonGeometry(
   const normals = new Float32Array(vertexCount * 3);
   const indices = [];
 
-  const lift = 0.55; // Guaranteed clearance above ground mesh
+  const lift = 0.55; // Clearance above ground mesh
 
   for (let i = 0; i <= numSegments; i++) {
     const t = i / numSegments;
@@ -169,7 +234,7 @@ function createConformalFlatRibbonGeometry(
 
 /**
  * Build a complete Three.js scene with ultra-crisp 4K UHD 3D terrain mesh,
- * guaranteed 100% full map coverage, and a flat ribbon track that is ALWAYS in the foreground.
+ * guaranteed 100% full map coverage, flat ribbon track, and 3D waypoint placards.
  */
 export async function buildTerrainScene(trackPoints, options = {}, onProgress = () => {}) {
   const config = {
@@ -178,6 +243,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     trackWidth: 1.4, // Wide flat ribbon width
     padding: 0.20, // 20% framing padding
     quality: 'ultra', // 'ultra' | 'high' | 'standard'
+    waypoints: [], // Array of waypoints [{ id, name, percent, lat, lon }]
     ...options,
   };
 
@@ -281,7 +347,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   const gridSpanX = gridMaxMx - gridMinMx;
   const gridSpanY = gridMaxMy - gridMinMy;
 
-  onProgress(15, `Scaricamento mappa completa (${numTilesX}×${numTilesY} = ${totalTiles} tile) a Zoom ${zoom}...`);
+  onProgress(15, `Scaricamento mappa (${numTilesX}×${numTilesY} tile) a Zoom ${zoom}...`);
 
   // 3. Load Map Tiles and DEM Elevation Tiles in Parallel Pool
   const mapCanvas = document.createElement('canvas');
@@ -458,16 +524,16 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     metalness: 0.02,
     flatShading: false,
     polygonOffset: true,
-    polygonOffsetFactor: 1.0, // Push terrain back slightly in depth buffer
+    polygonOffsetFactor: 1.0,
     polygonOffsetUnits: 4.0,
   });
 
   const terrainMesh = new THREE.Mesh(geometry, terrainMaterial);
   terrainMesh.receiveShadow = true;
   terrainMesh.castShadow = true;
-  terrainMesh.renderOrder = 0; // Terrain renders first
+  terrainMesh.renderOrder = 0;
 
-  onProgress(88, 'Creazione nastro piatto 3D sempre in primo piano...');
+  onProgress(88, 'Creazione percorso GPX e cartelli 3D delle tappe...');
 
   // 6. Project GPX Track to 3D World Space with Exact Ground Conformance
   const track3dPoints = [];
@@ -503,7 +569,6 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     getGroundYAt
   );
 
-  // Track material pulled forward in depth buffer with negative polygonOffset
   const trackMaterial = new THREE.MeshStandardMaterial({
     color: config.trackColor,
     emissive: config.trackColor,
@@ -512,7 +577,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     metalness: 0.3,
     side: THREE.DoubleSide,
     polygonOffset: true,
-    polygonOffsetFactor: -2.0, // Pull track forward in depth buffer
+    polygonOffsetFactor: -2.0,
     polygonOffsetUnits: -4.0,
     depthTest: true,
     depthWrite: true,
@@ -520,7 +585,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
   const trackMesh = new THREE.Mesh(ribbonGeom, trackMaterial);
   trackMesh.castShadow = true;
-  trackMesh.renderOrder = 10; // Track renders over terrain
+  trackMesh.renderOrder = 10;
 
   const totalIndexCount = ribbonGeom.index
     ? ribbonGeom.index.count
@@ -543,7 +608,62 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   markerMesh.castShadow = true;
   markerMesh.renderOrder = 20;
 
-  // 8. Construct Three.js Scene & Lighting
+  // 8. 3D Waypoint Signs / Placards (Cartelli 3D minimali)
+  const waypointsGroup = new THREE.Group();
+  const waypointDisposables = [];
+
+  const waypointsList = Array.isArray(config.waypoints) ? config.waypoints : [];
+
+  waypointsList.forEach((wpt, index) => {
+    if (!wpt || !wpt.name) return;
+
+    const t = Math.max(0, Math.min(1, (wpt.percent || 50) / 100));
+    const pt = trackCurve.getPointAt(Math.min(0.999, t));
+    const groundY = getGroundYAt(pt.x, pt.z);
+    const baseY = Math.max(pt.y, groundY);
+
+    // A. Ground Base Ring
+    const baseGeom = new THREE.CylinderGeometry(1.6, 1.6, 0.3, 16);
+    const baseMat = new THREE.MeshStandardMaterial({
+      color: '#14b8a6',
+      emissive: '#14b8a6',
+      emissiveIntensity: 0.8,
+    });
+    const baseMesh = new THREE.Mesh(baseGeom, baseMat);
+    baseMesh.position.set(pt.x, baseY + 0.2, pt.z);
+    waypointsGroup.add(baseMesh);
+    waypointDisposables.push(baseGeom, baseMat);
+
+    // B. Slim Vertical Pin Pole
+    const poleHeight = 14;
+    const poleGeom = new THREE.CylinderGeometry(0.3, 0.3, poleHeight, 8);
+    const poleMat = new THREE.MeshStandardMaterial({
+      color: '#94a3b8',
+      metalness: 0.6,
+      roughness: 0.3,
+    });
+    const poleMesh = new THREE.Mesh(poleGeom, poleMat);
+    poleMesh.position.set(pt.x, baseY + poleHeight / 2, pt.z);
+    waypointsGroup.add(poleMesh);
+    waypointDisposables.push(poleGeom, poleMat);
+
+    // C. 3D Billboard Placard with Place Name
+    const placardTexture = createWaypointPlacardTexture(wpt.name, index + 1);
+    const spriteMat = new THREE.SpriteMaterial({
+      map: placardTexture,
+      transparent: true,
+      depthTest: true,
+    });
+    const sprite = new THREE.Sprite(spriteMat);
+    sprite.position.set(pt.x, baseY + poleHeight + 4.5, pt.z);
+    sprite.scale.set(18, 4.5, 1);
+    sprite.renderOrder = 30;
+
+    waypointsGroup.add(sprite);
+    waypointDisposables.push(placardTexture, spriteMat);
+  });
+
+  // 9. Construct Three.js Scene & Lighting
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#0c1017');
   scene.fog = new THREE.FogExp2('#141b27', 0.00035);
@@ -551,6 +671,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   scene.add(terrainMesh);
   scene.add(trackMesh);
   scene.add(markerMesh);
+  scene.add(waypointsGroup);
 
   // Sunlight (Directional)
   const sunLight = new THREE.DirectionalLight(0xfff8ee, 1.9);
@@ -573,12 +694,12 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   const hemiLight = new THREE.HemisphereLight(0xbae6fd, 0x1e293b, 0.55);
   scene.add(hemiLight);
 
-  // 9. Camera Setup
+  // 10. Camera Setup
   const camera = new THREE.PerspectiveCamera(45, 16 / 9, 1, 9000);
   camera.position.set(0, worldHeight * 0.6, worldHeight * 0.7);
   camera.lookAt(0, 0, 0);
 
-  // 10. Animation / Progress Update Function
+  // 11. Animation / Progress Update Function
   const updateProgress = (t) => {
     const clampedT = Math.max(0, Math.min(1, t));
 
@@ -597,7 +718,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   // Set initial state at 0%
   updateProgress(0);
 
-  // 11. Cleanup Function
+  // 12. Cleanup Function
   const dispose = () => {
     geometry.dispose();
     terrainMaterial.dispose();
@@ -606,6 +727,9 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     trackMaterial.dispose();
     markerGeom.dispose();
     markerMaterial.dispose();
+    waypointDisposables.forEach((item) => {
+      if (item && typeof item.dispose === 'function') item.dispose();
+    });
   };
 
   onProgress(100, 'Pronto!');
