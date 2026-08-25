@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
@@ -21,7 +21,10 @@ import {
   Plus,
   Trash2,
   Key,
-  Flame,
+  Activity,
+  Gauge,
+  TrendingUp,
+  MapPin,
 } from 'lucide-react';
 import { buildTerrainScene } from '../lib/terrainEngine';
 import { createCameraController, CAMERA_MODES, resetCameraState } from '../lib/cameraSystem';
@@ -47,9 +50,13 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
   const [satelliteQuality, setSatelliteQuality] = useState('ultra'); // 'ultra' | 'high' | 'standard'
   const [heightExaggeration, setHeightExaggeration] = useState(1.6);
   const [trackColor, setTrackColor] = useState(config?.trackColor || '#14b8a6');
-  const [trackWidth, setTrackWidth] = useState(0.7); // Slim, high-definition track
+  const [trackWidth, setTrackWidth] = useState(1.4); // Wide flat ribbon width
   const [duration, setDuration] = useState(30);
   const [aspectRatio, setAspectRatio] = useState('16:9');
+
+  // HUD & Liquid Glass Telemetry Settings
+  const [showHud, setShowHud] = useState(true);
+  const [hudPosition, setHudPosition] = useState('bottom_left'); // 'bottom_left' | 'bottom_right' | 'top_left' | 'top_right'
 
   // Camera & Director Mode
   const [directorType, setDirectorType] = useState('auto'); // 'auto' | 'keyframe'
@@ -71,6 +78,39 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
   const [exportError, setExportError] = useState(null);
 
   const points = trackData?.points || [];
+  const stats = trackData?.stats || { totalDistanceKm: 0, elevationGainM: 0, minElevationM: 0, maxElevationM: 0 };
+
+  // Calculate live dynamic telemetry based on current progress
+  const currentTelemetry = useMemo(() => {
+    if (!points || points.length < 2) {
+      return { distKm: 0, eleM: 0, gainM: 0 };
+    }
+
+    const currentDist = previewProgress * stats.totalDistanceKm;
+    let currentPt = points[0];
+    let progressiveGain = 0;
+
+    for (let i = 1; i < points.length; i++) {
+      const prev = points[i - 1];
+      const curr = points[i];
+      if (curr.ele > prev.ele) {
+        progressiveGain += curr.ele - prev.ele;
+      }
+      if (curr.cumDistance >= currentDist) {
+        currentPt = curr;
+        break;
+      }
+      if (i === points.length - 1) {
+        currentPt = curr;
+      }
+    }
+
+    return {
+      distKm: currentDist.toFixed(1),
+      eleM: Math.round(currentPt.ele || 0),
+      gainM: Math.round(progressiveGain * (previewProgress < 0.99 ? previewProgress : 1)),
+    };
+  }, [points, stats, previewProgress]);
 
   // Build 3D Terrain & Track Scene
   const buildScene = useCallback(async () => {
@@ -104,7 +144,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
           heightExaggeration,
           trackColor,
           trackWidth,
-          padding: 0.22,
+          padding: 0.2,
         },
         (pct, msg) => {
           setBuildProgress(pct);
@@ -385,7 +425,146 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     }
   };
 
-  // Video Export Handler (WebCodecs MP4 1080p)
+  // Draw 2D Liquid Glass Telemetry HUD on Exported Video Frame
+  const drawHudOnVideo = useCallback(
+    (ctx, width, height, progress) => {
+      if (!showHud || !points || points.length < 2) return;
+
+      const scale = width / 1920; // Scale relative to 1080p
+      const cardW = 340 * scale;
+      const cardH = 135 * scale;
+      const margin = 32 * scale;
+
+      let cardX = margin;
+      let cardY = height - cardH - margin;
+
+      if (hudPosition === 'bottom_right') {
+        cardX = width - cardW - margin;
+      } else if (hudPosition === 'top_left') {
+        cardY = margin + 20 * scale;
+      } else if (hudPosition === 'top_right') {
+        cardX = width - cardW - margin;
+        cardY = margin + 20 * scale;
+      }
+
+      // 1. Draw Frosted Glass Card Background
+      ctx.save();
+      ctx.fillStyle = 'rgba(12, 16, 23, 0.72)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+      ctx.lineWidth = 1.5 * scale;
+
+      // Rounded rectangle
+      const r = 16 * scale;
+      ctx.beginPath();
+      ctx.moveTo(cardX + r, cardY);
+      ctx.lineTo(cardX + cardW - r, cardY);
+      ctx.quadraticCurveTo(cardX + cardW, cardY, cardX + cardW, cardY + r);
+      ctx.lineTo(cardX + cardW, cardY + cardH - r);
+      ctx.quadraticCurveTo(cardX + cardW, cardY + cardH, cardX + cardW - r, cardY + cardH);
+      ctx.lineTo(cardX + r, cardY + cardH);
+      ctx.quadraticCurveTo(cardX, cardY + cardH, cardX, cardY + cardH - r);
+      ctx.lineTo(cardX, cardY + r);
+      ctx.quadraticCurveTo(cardX, cardY, cardX + r, cardY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Top Glass Highlight
+      const grad = ctx.createLinearGradient(cardX, cardY, cardX, cardY + 24 * scale);
+      grad.addColorStop(0, 'rgba(255, 255, 255, 0.14)');
+      grad.addColorStop(1, 'rgba(255, 255, 255, 0.0)');
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      // 2. Draw Distance & Elevation Gain Stats
+      const curDist = (progress * stats.totalDistanceKm).toFixed(1);
+      let curEle = points[0].ele || 0;
+      const targetDist = progress * stats.totalDistanceKm;
+
+      for (let i = 0; i < points.length; i++) {
+        if (points[i].cumDistance >= targetDist) {
+          curEle = points[i].ele;
+          break;
+        }
+      }
+
+      // Distance Text
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `bold ${16 * scale}px "Outfit", sans-serif`;
+      ctx.fillText(`${curDist} km`, cardX + 16 * scale, cardY + 26 * scale);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = `${11 * scale}px sans-serif`;
+      ctx.fillText(`/ ${stats.totalDistanceKm} km`, cardX + 85 * scale, cardY + 26 * scale);
+
+      // Altitude & D+
+      ctx.fillStyle = '#14b8a6';
+      ctx.font = `bold ${15 * scale}px "JetBrains Mono", monospace`;
+      ctx.fillText(`${Math.round(curEle)} m`, cardX + cardW - 85 * scale, cardY + 26 * scale);
+
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = `${11 * scale}px sans-serif`;
+      ctx.fillText(`+${Math.round(stats.elevationGainM * progress)}m D+`, cardX + 16 * scale, cardY + 44 * scale);
+
+      // 3. Draw Mini Elevation Profile SVG Curve
+      const chartX = cardX + 16 * scale;
+      const chartY = cardY + 54 * scale;
+      const chartW = cardW - 32 * scale;
+      const chartH = 65 * scale;
+
+      const minE = stats.minElevationM || 0;
+      const maxE = Math.max(minE + 100, stats.maxElevationM || 1000);
+      const spanE = maxE - minE;
+
+      ctx.beginPath();
+      ctx.moveTo(chartX, chartY + chartH);
+
+      points.forEach((p, idx) => {
+        const px = chartX + (p.cumDistance / stats.totalDistanceKm) * chartW;
+        const py = chartY + chartH - ((p.ele - minE) / spanE) * chartH;
+        if (idx === 0) ctx.lineTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+
+      ctx.lineTo(chartX + chartW, chartY + chartH);
+      ctx.closePath();
+
+      const areaGrad = ctx.createLinearGradient(chartX, chartY, chartX, chartY + chartH);
+      areaGrad.addColorStop(0, 'rgba(20, 184, 166, 0.45)');
+      areaGrad.addColorStop(1, 'rgba(20, 184, 166, 0.05)');
+      ctx.fillStyle = areaGrad;
+      ctx.fill();
+
+      // Stroke Line
+      ctx.beginPath();
+      points.forEach((p, idx) => {
+        const px = chartX + (p.cumDistance / stats.totalDistanceKm) * chartW;
+        const py = chartY + chartH - ((p.ele - minE) / spanE) * chartH;
+        if (idx === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.strokeStyle = '#14b8a6';
+      ctx.lineWidth = 1.8 * scale;
+      ctx.stroke();
+
+      // Glowing Current Position Marker Dot on Chart
+      const markerDotX = chartX + progress * chartW;
+      const markerDotY = chartY + chartH - ((curEle - minE) / spanE) * chartH;
+
+      ctx.beginPath();
+      ctx.arc(markerDotX, markerDotY, 4.5 * scale, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = '#14b8a6';
+      ctx.lineWidth = 2 * scale;
+      ctx.stroke();
+
+      ctx.restore();
+    },
+    [showHud, points, stats, hudPosition]
+  );
+
+  // Video Export Handler (WebCodecs MP4 1080p with Liquid Glass HUD)
   const handleExport = async () => {
     if (!sceneDataRef.current || !rendererRef.current) return;
 
@@ -417,6 +596,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
           sceneDataRef.current.updateProgress(progress);
           cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, progress, activeMode, keyframes);
         },
+        drawOverlay: showHud ? (ctx, vw, vh, p) => drawHudOnVideo(ctx, vw, vh, p) : null,
         options: {
           width: w,
           height: h,
@@ -542,7 +722,78 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
           </div>
         </div>
 
-        {/* Card 2: Regia Telecamera (Automatica vs Keyframe Manuale) */}
+        {/* Card 2: Dati & Profilo Altimetrico (Liquid Glass HUD) */}
+        <div className="glass-card p-4 rounded-2xl border border-white/10 space-y-3 bg-[#181a20]/95 shadow-lg">
+          <div className="flex items-center justify-between border-b border-white/5 pb-2">
+            <div className="flex items-center gap-2">
+              <Activity className="w-4 h-4 text-teal-400" />
+              <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-200">
+                Overlay Dati & Profilo (Liquid Glass)
+              </h3>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showHud}
+                onChange={(e) => setShowHud(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-teal-600"></div>
+            </label>
+          </div>
+
+          {showHud && (
+            <div className="space-y-2.5 animate-fadeIn">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-neutral-400 font-medium">Posizione Scheda nel Video</span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 text-xs">
+                <button
+                  onClick={() => setHudPosition('bottom_left')}
+                  className={`p-2 rounded-xl border font-semibold transition-all ${
+                    hudPosition === 'bottom_left'
+                      ? 'border-teal-500 bg-teal-500/20 text-teal-300'
+                      : 'border-white/10 bg-white/5 text-neutral-400 hover:text-white'
+                  }`}
+                >
+                  ↙️ In Basso a Sinistra
+                </button>
+                <button
+                  onClick={() => setHudPosition('bottom_right')}
+                  className={`p-2 rounded-xl border font-semibold transition-all ${
+                    hudPosition === 'bottom_right'
+                      ? 'border-teal-500 bg-teal-500/20 text-teal-300'
+                      : 'border-white/10 bg-white/5 text-neutral-400 hover:text-white'
+                  }`}
+                >
+                  ↘️ In Basso a Destra
+                </button>
+                <button
+                  onClick={() => setHudPosition('top_left')}
+                  className={`p-2 rounded-xl border font-semibold transition-all ${
+                    hudPosition === 'top_left'
+                      ? 'border-teal-500 bg-teal-500/20 text-teal-300'
+                      : 'border-white/10 bg-white/5 text-neutral-400 hover:text-white'
+                  }`}
+                >
+                  ↖️ In Alto a Sinistra
+                </button>
+                <button
+                  onClick={() => setHudPosition('top_right')}
+                  className={`p-2 rounded-xl border font-semibold transition-all ${
+                    hudPosition === 'top_right'
+                      ? 'border-teal-500 bg-teal-500/20 text-teal-300'
+                      : 'border-white/10 bg-white/5 text-neutral-400 hover:text-white'
+                  }`}
+                >
+                  ↗️ In Alto a Destra
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Card 3: Regia Telecamera (Automatica vs Keyframe Manuale) */}
         <div className="glass-card p-4 rounded-2xl border border-white/10 space-y-3 bg-[#181a20]/95 shadow-lg">
           <div className="flex items-center justify-between border-b border-white/5 pb-2">
             <div className="flex items-center gap-2">
@@ -667,12 +918,12 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
           )}
         </div>
 
-        {/* Card 3: Rilievo Altimetrico & Traccia 3D */}
+        {/* Card 4: Rilievo Altimetrico & Nastro Piatto GPX */}
         <div className="glass-card p-4 rounded-2xl border border-white/10 space-y-3.5 bg-[#181a20]/95 shadow-lg">
           <div className="flex items-center gap-2 border-b border-white/5 pb-2">
             <Mountain className="w-4 h-4 text-teal-400" />
             <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-200">
-              Rilievo Montuoso & Tracciato
+              Rilievo Montuoso & Nastro GPX
             </h3>
           </div>
 
@@ -693,23 +944,23 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
             />
           </div>
 
-          {/* Track Width (Slim & Subtle) */}
+          {/* Ribbon Width (Flat Ribbon) */}
           <div className="space-y-1">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-neutral-400 font-medium">Spessore Linea GPX</span>
-              <span className="font-mono text-teal-300 font-bold">{trackWidth.toFixed(1)} mm</span>
+              <span className="text-neutral-400 font-medium">Larghezza Nastro Piatto</span>
+              <span className="font-mono text-teal-300 font-bold">{trackWidth.toFixed(1)} m</span>
             </div>
             <input
               type="range"
-              min="0.3"
-              max="2.5"
-              step="0.1"
+              min="0.4"
+              max="4.0"
+              step="0.2"
               value={trackWidth}
               onChange={(e) => setTrackWidth(parseFloat(e.target.value))}
               className="w-full accent-teal-500 bg-neutral-800 rounded-lg h-1.5 cursor-pointer"
             />
             <p className="text-[9px] text-neutral-500">
-              Linea sottile e definita per una visuale pulita delle montagne.
+              Nastro piatto e visibile che si stende a filo del terreno senza spessore verticale ingombrante.
             </p>
           </div>
 
@@ -741,7 +992,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
           </div>
         </div>
 
-        {/* Card 4: Formato Video & Durata */}
+        {/* Card 5: Formato Video & Durata */}
         <div className="glass-card p-4 rounded-2xl border border-white/10 space-y-3.5 bg-[#181a20]/95 shadow-lg">
           <div className="flex items-center gap-2 border-b border-white/5 pb-2">
             <Video className="w-4 h-4 text-teal-400" />
@@ -803,7 +1054,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
           </div>
         </div>
 
-        {/* Card 5: Generazione & Esportazione MP4 */}
+        {/* Card 6: Generazione & Esportazione MP4 */}
         <div className="glass-card p-4 rounded-2xl border border-teal-500/40 space-y-3 bg-[#181a20]/95 shadow-2xl">
           <div className="flex items-center gap-2 border-b border-white/5 pb-2">
             <Sparkles className="w-4 h-4 text-amber-400" />
@@ -872,7 +1123,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
           )}
 
           <p className="text-[10px] text-neutral-500 text-center">
-            MP4 H.264 • {duration * 30} fotogrammi renderizzati a 30fps
+            MP4 H.264 • {duration * 30} fotogrammi renderizzati a 30fps {showHud ? 'con Telemetria HUD' : ''}
           </p>
         </div>
       </div>
@@ -903,6 +1154,91 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
           )}
         </div>
 
+        {/* Live Liquid Glass Telemetry HUD Card Overlay */}
+        {showHud && sceneReady && !isBuilding && points.length > 1 && (
+          <div
+            className={`absolute z-20 pointer-events-none transition-all duration-300 ${
+              hudPosition === 'bottom_left'
+                ? 'bottom-20 left-4'
+                : hudPosition === 'bottom_right'
+                ? 'bottom-20 right-4'
+                : hudPosition === 'top_left'
+                ? 'top-14 left-4'
+                : 'top-14 right-4'
+            }`}
+          >
+            <div className="w-80 backdrop-blur-2xl bg-black/50 border border-white/20 rounded-2xl shadow-2xl p-3.5 space-y-2 pointer-events-auto relative overflow-hidden">
+              {/* Subtle Glass Specular Reflection Highlight */}
+              <div className="absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-white/10 to-transparent pointer-events-none rounded-t-2xl" />
+
+              {/* Row 1: Realtime Live Metrics */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-lg font-extrabold text-white font-mono tracking-tight">
+                      {currentTelemetry.distKm}
+                    </span>
+                    <span className="text-[11px] text-neutral-400 font-medium">/ {stats.totalDistanceKm} km</span>
+                  </div>
+                  <p className="text-[10px] text-teal-300 font-semibold flex items-center gap-1">
+                    <TrendingUp className="w-3 h-3 text-amber-400" />
+                    +{currentTelemetry.gainM}m D+
+                  </p>
+                </div>
+
+                <div className="text-right">
+                  <span className="text-base font-extrabold text-teal-300 font-mono">
+                    {currentTelemetry.eleM} m
+                  </span>
+                  <p className="text-[10px] text-neutral-400 font-mono">
+                    {(previewProgress * 100).toFixed(0)}% percorso
+                  </p>
+                </div>
+              </div>
+
+              {/* Row 2: Dynamic Elevation Profile Chart with Live Glowing Progress Dot */}
+              <div className="relative h-14 w-full bg-black/40 rounded-xl p-1 border border-white/5 overflow-hidden">
+                <svg className="w-full h-full" viewBox="0 0 100 40" preserveAspectRatio="none">
+                  <defs>
+                    <linearGradient id="hudAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#14b8a6" stopOpacity="0.45" />
+                      <stop offset="100%" stopColor="#14b8a6" stopOpacity="0.05" />
+                    </linearGradient>
+                  </defs>
+
+                  {/* Shaded Area Under Elevation Curve */}
+                  {(() => {
+                    const minE = stats.minElevationM || 0;
+                    const maxE = Math.max(minE + 50, stats.maxElevationM || 1000);
+                    const spanE = maxE - minE;
+
+                    const pathPoints = points.map((p) => {
+                      const x = (p.cumDistance / stats.totalDistanceKm) * 100;
+                      const y = 38 - ((p.ele - minE) / spanE) * 34;
+                      return `${x.toFixed(1)},${y.toFixed(1)}`;
+                    });
+
+                    const areaD = `M 0,38 L ${pathPoints.join(' L ')} L 100,38 Z`;
+                    const lineD = `M ${pathPoints.join(' L ')}`;
+
+                    const curX = previewProgress * 100;
+                    const curY = 38 - ((currentTelemetry.eleM - minE) / spanE) * 34;
+
+                    return (
+                      <>
+                        <path d={areaD} fill="url(#hudAreaGrad)" />
+                        <path d={lineD} fill="none" stroke="#14b8a6" strokeWidth="1.5" />
+                        {/* Live Dot */}
+                        <circle cx={curX} cy={curY} r="2.5" fill="#ffffff" stroke="#14b8a6" strokeWidth="1.2" />
+                      </>
+                    );
+                  })()}
+                </svg>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Loading Overlay */}
         {isBuilding && (
           <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#0c1017]/90 backdrop-blur-md">
@@ -911,7 +1247,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
                 <Loader2 className="w-7 h-7 animate-spin" />
               </div>
               <div>
-                <p className="text-sm font-bold text-white mb-1">Caricamento Satellite HD</p>
+                <p className="text-sm font-bold text-white mb-1">Caricamento Satellite 4K</p>
                 <p className="text-xs text-neutral-400">{buildMessage}</p>
               </div>
               <div className="w-48 bg-neutral-800 rounded-full h-1.5 overflow-hidden">

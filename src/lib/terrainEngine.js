@@ -87,14 +87,86 @@ async function asyncPool(poolLimit, array, iteratorFn) {
 }
 
 /**
+ * Builds a flat 3D ribbon geometry (wide horizontal strip, minimal vertical height)
+ * that drapes smoothly onto the terrain.
+ */
+function createFlatRibbonGeometry(curve, numSegments = 1600, width = 1.4, lift = 0.22) {
+  const points = curve.getSpacedPoints(numSegments);
+  const vertexCount = (numSegments + 1) * 2;
+  const positions = new Float32Array(vertexCount * 3);
+  const uvs = new Float32Array(vertexCount * 2);
+  const normals = new Float32Array(vertexCount * 3);
+  const indices = [];
+
+  for (let i = 0; i <= numSegments; i++) {
+    const t = i / numSegments;
+    const pt = points[i];
+    const tangent = curve.getTangentAt(Math.min(0.999, t)).normalize();
+
+    // Perpendicular horizontal vector (parallel to ground plane)
+    const perp = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+    const halfW = width * 0.5;
+
+    // Left vertex
+    const lx = pt.x - perp.x * halfW;
+    const ly = pt.y + lift;
+    const lz = pt.z - perp.z * halfW;
+
+    // Right vertex
+    const rx = pt.x + perp.x * halfW;
+    const ry = pt.y + lift;
+    const rz = pt.z + perp.z * halfW;
+
+    const idx = i * 2;
+    // Left vertex
+    positions[idx * 3] = lx;
+    positions[idx * 3 + 1] = ly;
+    positions[idx * 3 + 2] = lz;
+    uvs[idx * 2] = 0;
+    uvs[idx * 2 + 1] = t;
+    normals[idx * 3] = 0;
+    normals[idx * 3 + 1] = 1;
+    normals[idx * 3 + 2] = 0;
+
+    // Right vertex
+    positions[(idx + 1) * 3] = rx;
+    positions[(idx + 1) * 3 + 1] = ry;
+    positions[(idx + 1) * 3 + 2] = rz;
+    uvs[(idx + 1) * 2] = 1;
+    uvs[(idx + 1) * 2 + 1] = t;
+    normals[(idx + 1) * 3] = 0;
+    normals[(idx + 1) * 3 + 1] = 1;
+    normals[(idx + 1) * 3 + 2] = 0;
+
+    if (i < numSegments) {
+      const a = idx;
+      const b = idx + 1;
+      const c = idx + 2;
+      const d = idx + 3;
+
+      // Two double-sided triangles
+      indices.push(a, b, c);
+      indices.push(b, d, c);
+    }
+  }
+
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geom.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geom.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  geom.setIndex(indices);
+  return geom;
+}
+
+/**
  * Build a complete Three.js scene with ultra-crisp 4K UHD 3D terrain mesh,
- * guaranteed 100% complete map coverage of the whole GPX track, and a slim elegant track.
+ * guaranteed 100% full map coverage, and a flat wide glowing ribbon track.
  */
 export async function buildTerrainScene(trackPoints, options = {}, onProgress = () => {}) {
   const config = {
     heightExaggeration: 1.6,
     trackColor: '#14b8a6',
-    trackWidth: 0.7, // Slim, high-definition track
+    trackWidth: 1.4, // Wide horizontal ribbon width
     padding: 0.20, // 20% framing padding
     quality: 'ultra', // 'ultra' | 'high' | 'standard'
     ...options,
@@ -158,10 +230,9 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   let numTilesX = 0, numTilesY = 0;
 
   // Search from highest zoom (Zoom 18) down to find the maximum possible resolution
-  // that encloses 100% of the track without ever truncating
   for (let testZ = 18; testZ >= 9; testZ--) {
-    const minT = mercatorToTile(boundMinMx, boundMaxMy, testZ); // North-West
-    const maxT = mercatorToTile(boundMaxMx, boundMinMy, testZ); // South-East
+    const minT = mercatorToTile(boundMinMx, boundMaxMy, testZ);
+    const maxT = mercatorToTile(boundMaxMx, boundMinMy, testZ);
     const nX = maxT.tx - minT.tx + 1;
     const nY = maxT.ty - minT.ty + 1;
     const totalT = nX * nY;
@@ -178,7 +249,6 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     }
   }
 
-  // Fallback if needed
   if (numTilesX === 0) {
     zoom = 12;
     const minT = mercatorToTile(boundMinMx, boundMaxMy, zoom);
@@ -194,11 +264,11 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   const tileSizeM = C_EARTH / Math.pow(2, zoom);
   const totalTiles = numTilesX * numTilesY;
 
-  // Exact geographic extent of all loaded tiles (Guaranteed to cover all points)
+  // Exact geographic extent of all loaded tiles
   const gridMinMx = startTx * tileSizeM - C_EARTH / 2;
   const gridMaxMx = (endTx + 1) * tileSizeM - C_EARTH / 2;
-  const gridMaxMy = C_EARTH / 2 - startTy * tileSizeM; // North
-  const gridMinMy = C_EARTH / 2 - (endTy + 1) * tileSizeM; // South
+  const gridMaxMy = C_EARTH / 2 - startTy * tileSizeM;
+  const gridMinMy = C_EARTH / 2 - (endTy + 1) * tileSizeM;
 
   const gridSpanX = gridMaxMx - gridMinMx;
   const gridSpanY = gridMaxMy - gridMinMy;
@@ -224,7 +294,6 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     }
   }
 
-  // DEM zoom level: clamp between 12 and 15
   const demZoom = Math.min(15, Math.max(12, zoom));
 
   await asyncPool(18, tileItems, async ({ tx, ty, col, row }) => {
@@ -372,7 +441,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   texture.generateMipmaps = true;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
-  texture.anisotropy = 16; // Maximum sharpness at grazing angles
+  texture.anisotropy = 16;
 
   const terrainMaterial = new THREE.MeshStandardMaterial({
     map: texture,
@@ -385,9 +454,9 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   terrainMesh.receiveShadow = true;
   terrainMesh.castShadow = true;
 
-  onProgress(88, 'Creazione percorso GPX sottile ed elegante...');
+  onProgress(88, 'Creazione nastro piatto 3D del percorso GPX...');
 
-  // 6. Project GPX Track to 3D World Space (Slim & Subtle)
+  // 6. Project GPX Track to 3D World Space (Flat Wide Ribbon Strip)
   const track3dPoints = [];
   let lastVector = null;
 
@@ -400,12 +469,12 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
     const sampleEle = getElevationAtMercator(p.mx, p.my);
     const baseEle = sampleEle > 0 ? sampleEle : p.ele;
-    // Lower lift so track drapes naturally onto the terrain surface
-    const vy = (baseEle - lowestEle) * scale * config.heightExaggeration + (config.trackWidth * 0.4);
+    // Micro lift for flat ribbon
+    const vy = (baseEle - lowestEle) * scale * config.heightExaggeration + 0.2;
 
     const pt = new THREE.Vector3(vx, vy, vz);
 
-    if (!lastVector || lastVector.distanceTo(pt) > 0.45) {
+    if (!lastVector || lastVector.distanceTo(pt) > 0.4) {
       track3dPoints.push(pt);
       lastVector = pt;
     }
@@ -416,34 +485,33 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   }
 
   const trackCurve = new THREE.CatmullRomCurve3(track3dPoints, false, 'centripetal', 0.2);
-  const tubularSegments = Math.max(300, Math.min(3500, track3dPoints.length * 2));
 
-  // Slim 3D tube geometry with lower radial segments for an elegant clean look
-  const trackTubeGeom = new THREE.TubeGeometry(
+  // FLAT RIBBON GEOMETRY: wide horizontally, minimal vertical height
+  const ribbonGeom = createFlatRibbonGeometry(
     trackCurve,
-    tubularSegments,
-    config.trackWidth,
-    8,
-    false
+    Math.max(400, track3dPoints.length * 3),
+    config.trackWidth, // Width of horizontal ribbon
+    0.22 // Height lift above terrain
   );
 
   const trackMaterial = new THREE.MeshStandardMaterial({
     color: config.trackColor,
     emissive: config.trackColor,
-    emissiveIntensity: 0.75,
-    roughness: 0.15,
-    metalness: 0.4,
+    emissiveIntensity: 0.8,
+    roughness: 0.2,
+    metalness: 0.3,
+    side: THREE.DoubleSide,
   });
 
-  const trackMesh = new THREE.Mesh(trackTubeGeom, trackMaterial);
+  const trackMesh = new THREE.Mesh(ribbonGeom, trackMaterial);
   trackMesh.castShadow = true;
 
-  const totalIndexCount = trackTubeGeom.index
-    ? trackTubeGeom.index.count
-    : trackTubeGeom.attributes.position.count;
+  const totalIndexCount = ribbonGeom.index
+    ? ribbonGeom.index.count
+    : ribbonGeom.attributes.position.count;
 
-  // 7. Sleek Animated Leading Marker (Compact Glowing Sphere)
-  const markerGeom = new THREE.SphereGeometry(config.trackWidth * 1.5, 16, 16);
+  // 7. Sleek Leading Marker (Glowing Beacon Disc)
+  const markerGeom = new THREE.CylinderGeometry(config.trackWidth * 0.9, config.trackWidth * 0.9, 0.4, 24);
   const markerMaterial = new THREE.MeshStandardMaterial({
     color: '#ffffff',
     emissive: config.trackColor,
@@ -494,17 +562,15 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   const updateProgress = (t) => {
     const clampedT = Math.max(0, Math.min(1, t));
 
-    // Update illuminated track segment
+    // Update illuminated ribbon draw range
     const drawCount = Math.floor(totalIndexCount * clampedT);
-    trackTubeGeom.setDrawRange(0, drawCount);
+    ribbonGeom.setDrawRange(0, drawCount);
 
     // Update marker position
     const pos = trackCurve.getPointAt(clampedT);
-    const tangent = trackCurve.getTangentAt(clampedT);
+    markerMesh.position.copy(pos).add(new THREE.Vector3(0, 0.3, 0));
 
-    markerMesh.position.copy(pos);
-
-    return { position: pos, tangent };
+    return { position: pos };
   };
 
   // Set initial state at 0%
@@ -515,7 +581,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     geometry.dispose();
     terrainMaterial.dispose();
     texture.dispose();
-    trackTubeGeom.dispose();
+    ribbonGeom.dispose();
     trackMaterial.dispose();
     markerGeom.dispose();
     markerMaterial.dispose();

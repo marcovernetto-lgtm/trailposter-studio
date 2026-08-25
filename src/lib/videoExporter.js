@@ -11,19 +11,28 @@ export function isVideoExportSupported() {
 /**
  * Export a Three.js scene to MP4 video file.
  * 
- * Renders the scene frame-by-frame offline (deterministic, no frame drops).
- * NOTE: The renderer MUST have `preserveDrawingBuffer: true` for VideoFrame to capture correctly.
+ * Renders the scene frame-by-frame offline (deterministic, no frame drops)
+ * and supports custom 2D HUD / liquid glass overlay rendering.
  * 
  * @param {Object} params
  * @param {THREE.WebGLRenderer} params.renderer - Three.js renderer
  * @param {THREE.Scene} params.scene - Three.js scene
  * @param {THREE.PerspectiveCamera} params.camera - Three.js camera
  * @param {Function} params.updateFrame - function(progress: 0-1) called before each frame to update scene state
+ * @param {Function} [params.drawOverlay] - optional function(ctx, width, height, progress) for burning HUD into video
  * @param {Object} params.options - { width: 1920, height: 1080, fps: 30, durationSec: 30, bitrate: 8_000_000 }
  * @param {Function} params.onProgress - callback(percent: 0-100, message: string)
  * @returns {Promise<string>} Object URL of the generated MP4 blob
  */
-export async function exportVideo({ renderer, scene, camera, updateFrame, options = {}, onProgress = () => {} }) {
+export async function exportVideo({
+  renderer,
+  scene,
+  camera,
+  updateFrame,
+  drawOverlay = null,
+  options = {},
+  onProgress = () => {},
+}) {
   if (!isVideoExportSupported()) {
     throw new Error('WebCodecs API is not supported in this browser.');
   }
@@ -33,15 +42,25 @@ export async function exportVideo({ renderer, scene, camera, updateFrame, option
     height = 1080,
     fps = 30,
     durationSec = 30,
-    bitrate = 8_000_000
+    bitrate = 8_000_000,
   } = options;
 
   const totalFrames = fps * durationSec;
-  
+
   // Save current renderer state
   const originalWidth = renderer.domElement.clientWidth;
   const originalHeight = renderer.domElement.clientHeight;
   const originalAspect = camera.aspect;
+
+  // Offscreen composite canvas if overlay is present
+  let compositeCanvas = null;
+  let compositeCtx = null;
+  if (drawOverlay) {
+    compositeCanvas = document.createElement('canvas');
+    compositeCanvas.width = width;
+    compositeCanvas.height = height;
+    compositeCtx = compositeCanvas.getContext('2d');
+  }
 
   try {
     renderer.setSize(width, height, false);
@@ -61,11 +80,13 @@ export async function exportVideo({ renderer, scene, camera, updateFrame, option
     let encoderError = null;
     const encoder = new VideoEncoder({
       output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
-      error: (e) => { encoderError = e; },
+      error: (e) => {
+        encoderError = e;
+      },
     });
 
     encoder.configure({
-      codec: 'avc1.640028',  // H.264 High Profile Level 4.0
+      codec: 'avc1.640028', // H.264 High Profile Level 4.0
       width,
       height,
       bitrate,
@@ -81,8 +102,17 @@ export async function exportVideo({ renderer, scene, camera, updateFrame, option
       updateFrame(progress);
       renderer.render(scene, camera);
 
-      const frame = new VideoFrame(renderer.domElement, { 
-        timestamp: Math.floor((i * 1_000_000) / fps) 
+      let frameSource = renderer.domElement;
+
+      // Composite HUD overlay if enabled
+      if (drawOverlay && compositeCtx) {
+        compositeCtx.drawImage(renderer.domElement, 0, 0, width, height);
+        drawOverlay(compositeCtx, width, height, progress);
+        frameSource = compositeCanvas;
+      }
+
+      const frame = new VideoFrame(frameSource, {
+        timestamp: Math.floor((i * 1_000_000) / fps),
       });
 
       encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
@@ -90,14 +120,13 @@ export async function exportVideo({ renderer, scene, camera, updateFrame, option
 
       onProgress(Math.round((i / totalFrames) * 100), `Frame ${i + 1}/${totalFrames}`);
 
-      // Yield to the browser to prevent UI freeze and allow progress updates
+      // Yield to browser to prevent UI freeze
       if (i % 10 === 0) {
-        await new Promise(r => setTimeout(r, 0));
+        await new Promise((r) => setTimeout(r, 0));
       }
 
-      // Wait if encode queue gets too large
       while (encoder.encodeQueueSize > 10) {
-        await new Promise(r => setTimeout(r, 10));
+        await new Promise((r) => setTimeout(r, 10));
       }
     }
 
@@ -108,7 +137,6 @@ export async function exportVideo({ renderer, scene, camera, updateFrame, option
     const { buffer } = muxer.target;
     const blob = new Blob([buffer], { type: 'video/mp4' });
     return URL.createObjectURL(blob);
-
   } catch (error) {
     throw error;
   } finally {
@@ -122,7 +150,7 @@ export async function exportVideo({ renderer, scene, camera, updateFrame, option
 /**
  * Trigger download of a blob URL as a file.
  * @param {string} blobUrl - Object URL from exportVideo
- * @param {string} filename - Desired filename (e.g., 'trail-flyover.mp4')
+ * @param {string} filename - Desired filename
  */
 export function downloadVideo(blobUrl, filename) {
   const a = document.createElement('a');
@@ -131,7 +159,7 @@ export function downloadVideo(blobUrl, filename) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  
+
   setTimeout(() => {
     URL.revokeObjectURL(blobUrl);
   }, 100);
