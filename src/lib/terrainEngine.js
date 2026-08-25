@@ -554,6 +554,65 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   terrainMesh.castShadow = true;
   terrainMesh.renderOrder = 0;
 
+  // 5.b Distant Surrounding Terrain Skirt (Low-Resolution, Softly Blurred Distant Horizon)
+  const skirtWidth = worldWidth * 2.8;
+  const skirtHeight = worldHeight * 2.8;
+  const skirtGeom = new THREE.PlaneGeometry(skirtWidth, skirtHeight, 70, 70);
+  skirtGeom.rotateX(-Math.PI / 2);
+
+  const skirtPosAttr = skirtGeom.attributes.position;
+  const halfInnerW = worldWidth * 0.495;
+  const halfInnerH = worldHeight * 0.495;
+
+  for (let i = 0; i < skirtPosAttr.count; i++) {
+    const vx = skirtPosAttr.getX(i);
+    const vz = skirtPosAttr.getZ(i);
+
+    const clampedVx = Math.max(-halfInnerW, Math.min(halfInnerW, vx));
+    const clampedVz = Math.max(-halfInnerH, Math.min(halfInnerH, vz));
+    const edgeY = getGroundYAt(clampedVx, clampedVz);
+
+    const distOutX = Math.max(0, Math.abs(vx) - halfInnerW) / (skirtWidth * 0.5 - halfInnerW);
+    const distOutZ = Math.max(0, Math.abs(vz) - halfInnerH) / (skirtHeight * 0.5 - halfInnerH);
+    const distOut = Math.min(1.0, Math.sqrt(distOutX * distOutX + distOutZ * distOutZ));
+
+    const undulation = Math.sin(vx * 0.012) * Math.cos(vz * 0.012) * 20 * (1.0 - distOut);
+    const skirtY = Math.max(0, edgeY * (1.0 - distOut * 0.85) + undulation);
+    skirtPosAttr.setY(i, skirtY);
+  }
+  skirtGeom.computeVertexNormals();
+
+  const skirtCanvas = document.createElement('canvas');
+  skirtCanvas.width = 256;
+  skirtCanvas.height = 256;
+  const skirtCtx = skirtCanvas.getContext('2d');
+
+  skirtCtx.filter = 'blur(6px)';
+  skirtCtx.drawImage(mapCanvas, 0, 0, 256, 256);
+  skirtCtx.filter = 'none';
+
+  const hazeGrad = skirtCtx.createRadialGradient(128, 128, 60, 128, 128, 140);
+  hazeGrad.addColorStop(0, 'rgba(12, 16, 23, 0.0)');
+  hazeGrad.addColorStop(1, 'rgba(12, 16, 23, 0.75)');
+  skirtCtx.fillStyle = hazeGrad;
+  skirtCtx.fillRect(0, 0, 256, 256);
+
+  const skirtTexture = new THREE.CanvasTexture(skirtCanvas);
+  skirtTexture.colorSpace = THREE.SRGBColorSpace;
+  skirtTexture.minFilter = THREE.LinearFilter;
+  skirtTexture.magFilter = THREE.LinearFilter;
+
+  const skirtMaterial = new THREE.MeshStandardMaterial({
+    map: skirtTexture,
+    roughness: 0.95,
+    metalness: 0.01,
+    flatShading: false,
+  });
+
+  const skirtMesh = new THREE.Mesh(skirtGeom, skirtMaterial);
+  skirtMesh.receiveShadow = true;
+  skirtMesh.renderOrder = -1;
+
   onProgress(88, 'Creazione percorso GPX e cartelli 3D...');
 
   // 6. Project GPX Track to 3D World Space with Exact Ground Conformance
@@ -696,6 +755,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   scene.background = new THREE.Color('#0c1017');
   scene.fog = new THREE.FogExp2('#141b27', 0.00035);
 
+  scene.add(skirtMesh);
   scene.add(terrainMesh);
   scene.add(trackMesh);
   scene.add(markerMesh);
@@ -751,6 +811,9 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     geometry.dispose();
     terrainMaterial.dispose();
     texture.dispose();
+    skirtGeom.dispose();
+    skirtMaterial.dispose();
+    skirtTexture.dispose();
     ribbonGeom.dispose();
     trackMaterial.dispose();
     markerGeom.dispose();

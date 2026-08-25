@@ -29,6 +29,7 @@ export async function exportVideo({
   scene,
   camera,
   updateFrame,
+  renderFrame = null,
   drawOverlay = null,
   options = {},
   onProgress = () => {},
@@ -100,7 +101,11 @@ export async function exportVideo({
 
       const progress = totalFrames > 1 ? i / (totalFrames - 1) : 1;
       updateFrame(progress);
-      renderer.render(scene, camera);
+      if (typeof renderFrame === 'function') {
+        renderFrame(renderer, scene, camera, progress);
+      } else {
+        renderer.render(scene, camera);
+      }
 
       let frameSource = renderer.domElement;
 
