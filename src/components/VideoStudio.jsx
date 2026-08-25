@@ -81,8 +81,60 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
   const [exportedUrl, setExportedUrl] = useState(null);
   const [exportError, setExportError] = useState(null);
 
-  const points = trackData?.points || [];
-  const stats = trackData?.stats || { totalDistanceKm: 0, elevationGainM: 0, minElevationM: 0, maxElevationM: 0 };
+  const rawPoints = trackData?.points || [];
+  const rawStats = trackData?.stats || {};
+
+  // Process points with cumulative distance in meters and cumulative elevation gain in meters
+  const { points, totalDistanceM, totalDistanceKm, minElevation, maxElevation, totalElevationGain } = useMemo(() => {
+    if (!rawPoints || rawPoints.length < 2) {
+      return {
+        points: [],
+        totalDistanceM: 1,
+        totalDistanceKm: '0.0',
+        minElevation: 0,
+        maxElevation: 1000,
+        totalElevationGain: 0,
+      };
+    }
+
+    let cumGain = 0;
+    let minEle = Infinity;
+    let maxEle = -Infinity;
+
+    const processed = rawPoints.map((p, idx) => {
+      const ele = p.ele != null ? Number(p.ele) : 0;
+      if (ele < minEle) minEle = ele;
+      if (ele > maxEle) maxEle = ele;
+
+      if (idx > 0) {
+        const prevEle = rawPoints[idx - 1].ele != null ? Number(rawPoints[idx - 1].ele) : 0;
+        const diff = ele - prevEle;
+        if (diff > 0) cumGain += diff;
+      }
+
+      return {
+        ...p,
+        ele,
+        cumGain,
+      };
+    });
+
+    const lastPt = processed[processed.length - 1];
+    const totalDistM = lastPt?.cumDistance || parseFloat(rawStats.totalDistanceKm || 0) * 1000 || 1;
+    const totalDistKm = (totalDistM / 1000).toFixed(1);
+
+    if (minEle === Infinity) minEle = 0;
+    if (maxEle === -Infinity) maxEle = minEle + 100;
+
+    return {
+      points: processed,
+      totalDistanceM: totalDistM,
+      totalDistanceKm: totalDistKm,
+      minElevation: Math.round(minEle),
+      maxElevation: Math.round(maxEle),
+      totalElevationGain: Math.round(rawStats.elevationGainM || cumGain),
+    };
+  }, [rawPoints, rawStats]);
 
   // Calculate trail progress vs outro progress
   const timeProgress = useMemo(() => {
@@ -99,36 +151,36 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
   // Calculate live dynamic telemetry based on current trail progress
   const currentTelemetry = useMemo(() => {
     if (!points || points.length < 2) {
-      return { distKm: '0.0', eleM: 0, gainM: 0 };
+      return { distKm: '0.0', eleM: 0, gainM: 0, isOutro: false };
     }
 
     const { trailProgress, isOutro } = timeProgress;
-    const currentDist = trailProgress * stats.totalDistanceKm;
-    let currentPt = points[0];
-    let progressiveGain = 0;
+    const targetDistM = trailProgress * totalDistanceM;
 
-    for (let i = 1; i < points.length; i++) {
-      const prev = points[i - 1];
-      const curr = points[i];
-      if (curr.ele > prev.ele) {
-        progressiveGain += curr.ele - prev.ele;
-      }
-      if (curr.cumDistance >= currentDist) {
-        currentPt = curr;
-        break;
-      }
-      if (i === points.length - 1) {
-        currentPt = curr;
+    let low = 0;
+    let high = points.length - 1;
+    let ptIndex = 0;
+
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      if (points[mid].cumDistance <= targetDistM) {
+        ptIndex = mid;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
       }
     }
 
+    const currentPt = points[ptIndex] || points[0];
+    const currentDistKm = (targetDistM / 1000).toFixed(1);
+
     return {
-      distKm: currentDist.toFixed(1),
+      distKm: currentDistKm,
       eleM: Math.round(currentPt.ele || 0),
-      gainM: Math.round(isOutro ? stats.elevationGainM : progressiveGain * (trailProgress < 0.99 ? trailProgress : 1)),
+      gainM: Math.round(isOutro ? totalElevationGain : currentPt.cumGain || 0),
       isOutro,
     };
-  }, [points, stats, timeProgress]);
+  }, [points, totalDistanceM, totalElevationGain, timeProgress]);
 
   // Build 3D Terrain & Track Scene
   const buildScene = useCallback(async () => {
@@ -295,7 +347,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     return () => resizeObserver.disconnect();
   }, []);
 
-  // Preview Animation Playback Loop (Handles 4s Grand Outro Zoom-out)
+  // Preview Animation Playback Loop
   useEffect(() => {
     if (!isPreviewPlaying || !sceneDataRef.current || !cameraCtrlRef.current) return;
 
@@ -499,9 +551,19 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       const tp = elapsed <= duration ? elapsed / duration : 1.0;
       const isOutro = elapsed > duration;
 
+      const targetDistM = tp * totalDistanceM;
+      let ptIndex = 0;
+      while (ptIndex < points.length - 1 && points[ptIndex + 1].cumDistance <= targetDistM) {
+        ptIndex++;
+      }
+      const curPt = points[ptIndex] || points[0];
+      const curDistKm = (targetDistM / 1000).toFixed(1);
+      const curEle = Math.round(curPt.ele || 0);
+      const curGain = Math.round(isOutro ? totalElevationGain : curPt.cumGain || 0);
+
       // 1. Draw Frosted Glass Card Background
       ctx.save();
-      ctx.fillStyle = 'rgba(10, 14, 20, 0.72)';
+      ctx.fillStyle = 'rgba(10, 14, 20, 0.75)';
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
       ctx.lineWidth = 1.5 * scale;
 
@@ -528,57 +590,43 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       ctx.fill();
 
       // 2. Draw Distance & Elevation Gain Stats
-      const curDist = (tp * stats.totalDistanceKm).toFixed(1);
-      let curEle = points[0].ele || 0;
-      const targetDist = tp * stats.totalDistanceKm;
-
-      for (let i = 0; i < points.length; i++) {
-        if (points[i].cumDistance >= targetDist) {
-          curEle = points[i].ele;
-          break;
-        }
-      }
-
-      // Distance Text
       ctx.fillStyle = '#ffffff';
       ctx.font = `bold ${16 * scale}px "Outfit", sans-serif`;
-      ctx.fillText(`${curDist} km`, cardX + 16 * scale, cardY + 26 * scale);
+      ctx.fillText(`${curDistKm} km`, cardX + 16 * scale, cardY + 26 * scale);
 
       ctx.fillStyle = '#94a3b8';
       ctx.font = `${11 * scale}px sans-serif`;
-      ctx.fillText(`/ ${stats.totalDistanceKm} km`, cardX + 85 * scale, cardY + 26 * scale);
+      ctx.fillText(`/ ${totalDistanceKm} km`, cardX + 85 * scale, cardY + 26 * scale);
 
       // Altitude & D+
       if (isOutro) {
         ctx.fillStyle = '#f59e0b';
         ctx.font = `bold ${12 * scale}px sans-serif`;
-        ctx.fillText(`🏆 TRAGUARDO FINALE`, cardX + cardW - 150 * scale, cardY + 26 * scale);
+        ctx.fillText(`🏆 TRAGUARDO FINALE`, cardX + cardW - 160 * scale, cardY + 26 * scale);
       } else {
         ctx.fillStyle = '#14b8a6';
         ctx.font = `bold ${15 * scale}px "JetBrains Mono", monospace`;
-        ctx.fillText(`${Math.round(curEle)} m`, cardX + cardW - 85 * scale, cardY + 26 * scale);
+        ctx.fillText(`${curEle} m`, cardX + cardW - 85 * scale, cardY + 26 * scale);
       }
 
       ctx.fillStyle = '#f59e0b';
       ctx.font = `${11 * scale}px sans-serif`;
-      ctx.fillText(`+${Math.round(stats.elevationGainM * tp)}m D+`, cardX + 16 * scale, cardY + 44 * scale);
+      ctx.fillText(`+${curGain}m D+`, cardX + 16 * scale, cardY + 44 * scale);
 
-      // 3. Draw Mini Elevation Profile Curve
+      // 3. Draw Elevation Profile Curve
       const chartX = cardX + 16 * scale;
       const chartY = cardY + 54 * scale;
       const chartW = cardW - 32 * scale;
       const chartH = 65 * scale;
 
-      const minE = stats.minElevationM || 0;
-      const maxE = Math.max(minE + 100, stats.maxElevationM || 1000);
-      const spanE = maxE - minE;
+      const spanE = Math.max(30, maxElevation - minElevation);
 
       ctx.beginPath();
       ctx.moveTo(chartX, chartY + chartH);
 
       points.forEach((p, idx) => {
-        const px = chartX + (p.cumDistance / stats.totalDistanceKm) * chartW;
-        const py = chartY + chartH - ((p.ele - minE) / spanE) * chartH;
+        const px = chartX + (p.cumDistance / totalDistanceM) * chartW;
+        const py = chartY + chartH - ((p.ele - minElevation) / spanE) * chartH;
         if (idx === 0) ctx.lineTo(px, py);
         else ctx.lineTo(px, py);
       });
@@ -595,8 +643,8 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       // Stroke Line
       ctx.beginPath();
       points.forEach((p, idx) => {
-        const px = chartX + (p.cumDistance / stats.totalDistanceKm) * chartW;
-        const py = chartY + chartH - ((p.ele - minE) / spanE) * chartH;
+        const px = chartX + (p.cumDistance / totalDistanceM) * chartW;
+        const py = chartY + chartH - ((p.ele - minElevation) / spanE) * chartH;
         if (idx === 0) ctx.moveTo(px, py);
         else ctx.lineTo(px, py);
       });
@@ -606,7 +654,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
       // Glowing Current Position Marker Dot on Chart
       const markerDotX = chartX + tp * chartW;
-      const markerDotY = chartY + chartH - ((curEle - minE) / spanE) * chartH;
+      const markerDotY = chartY + chartH - ((curEle - minElevation) / spanE) * chartH;
 
       ctx.beginPath();
       ctx.arc(markerDotX, markerDotY, 4.5 * scale, 0, Math.PI * 2);
@@ -618,7 +666,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
       ctx.restore();
     },
-    [showHud, points, stats, hudPosition, duration, totalDuration]
+    [showHud, points, totalDistanceM, totalDistanceKm, minElevation, maxElevation, totalElevationGain, hudPosition, duration, totalDuration]
   );
 
   // Video Export Handler (WebCodecs MP4 1080p with 4s Outro Zoom-out)
@@ -961,7 +1009,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
                       <div>
                         <p className="font-semibold text-white text-[11px]">{kf.name}</p>
                         <p className="text-[9px] text-neutral-400 font-mono">
-                          Percorso: {(kf.t * 100).toFixed(0)}% ({(kf.t * duration).toFixed(1)}s)
+                          Tempo: {(kf.t * duration).toFixed(1)}s
                         </p>
                       </div>
                     </div>
@@ -1240,14 +1288,14 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
               {/* Subtle Glass Specular Reflection Highlight */}
               <div className="absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-white/10 to-transparent pointer-events-none rounded-t-2xl" />
 
-              {/* Row 1: Realtime Live Metrics */}
+              {/* Row 1: Realtime Live Metrics (No Percentage) */}
               <div className="flex items-center justify-between">
                 <div>
                   <div className="flex items-baseline gap-1">
                     <span className="text-lg font-extrabold text-white font-mono tracking-tight">
                       {currentTelemetry.distKm}
                     </span>
-                    <span className="text-[11px] text-neutral-400 font-medium">/ {stats.totalDistanceKm} km</span>
+                    <span className="text-[11px] text-neutral-400 font-medium">/ {totalDistanceKm} km</span>
                   </div>
                   <p className="text-[10px] text-teal-300 font-semibold flex items-center gap-1">
                     <TrendingUp className="w-3 h-3 text-amber-400" />
@@ -1266,9 +1314,6 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
                       {currentTelemetry.eleM} m
                     </span>
                   )}
-                  <p className="text-[10px] text-neutral-400 font-mono">
-                    {(timeProgress.trailProgress * 100).toFixed(0)}% percorso
-                  </p>
                 </div>
               </div>
 
@@ -1284,13 +1329,11 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
                   {/* Shaded Area Under Elevation Curve */}
                   {(() => {
-                    const minE = stats.minElevationM || 0;
-                    const maxE = Math.max(minE + 50, stats.maxElevationM || 1000);
-                    const spanE = maxE - minE;
+                    const spanE = Math.max(30, maxElevation - minElevation);
 
                     const pathPoints = points.map((p) => {
-                      const x = (p.cumDistance / stats.totalDistanceKm) * 100;
-                      const y = 38 - ((p.ele - minE) / spanE) * 34;
+                      const x = (p.cumDistance / totalDistanceM) * 100;
+                      const y = 36 - ((p.ele - minElevation) / spanE) * 30;
                       return `${x.toFixed(1)},${y.toFixed(1)}`;
                     });
 
@@ -1298,7 +1341,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
                     const lineD = `M ${pathPoints.join(' L ')}`;
 
                     const curX = timeProgress.trailProgress * 100;
-                    const curY = 38 - ((currentTelemetry.eleM - minE) / spanE) * 34;
+                    const curY = 36 - ((currentTelemetry.eleM - minElevation) / spanE) * 30;
 
                     return (
                       <>
