@@ -4,52 +4,16 @@ import * as THREE from 'three';
 const R_EARTH = 6378137.0;
 const C_EARTH = 2.0 * Math.PI * R_EARTH; // ~40075016.68557849 meters
 
-// Fully CORS-enabled, reliable, high-speed free map tile providers
+// High-Resolution Satellite HD Imagery Provider (Esri World Imagery)
 export const MAP_STYLES = {
   satellite: {
     id: 'satellite',
-    name: 'Satellite HD',
+    name: 'Satellite HD Max',
     icon: '🛰️',
-    description: 'Immagini aeree e satellitari ad alta risoluzione Esri',
+    description: 'Immagini aeree e satellitari ad altissima risoluzione Esri / Maxar',
     getTileUrl: (z, x, y) =>
       `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
     attribution: '© Esri, Maxar, Earthstar Geographics',
-  },
-  topo: {
-    id: 'topo',
-    name: 'Topografico HD',
-    icon: '🗻',
-    description: 'Curve di livello, vette alpine, ombreggiature e sentieri Esri',
-    getTileUrl: (z, x, y) =>
-      `https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/${z}/${y}/${x}`,
-    attribution: '© Esri, Garmin, USGS, NPS',
-  },
-  outdoors: {
-    id: 'outdoors',
-    name: 'Outdoor & Sentieri',
-    icon: '🧭',
-    description: 'Cartografia dettagliata sentieri, strade e boschi Carto',
-    getTileUrl: (z, x, y) =>
-      `https://basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`,
-    attribution: '© OpenStreetMap contributors, © CARTO',
-  },
-  shaded: {
-    id: 'shaded',
-    name: 'Rilievo Fisico',
-    icon: '⛰️',
-    description: 'Morfologia naturale delle montagne e geologia alpina',
-    getTileUrl: (z, x, y) =>
-      `https://server.arcgisonline.com/ArcGIS/rest/services/World_Physical_Map/MapServer/tile/${z}/${y}/${x}`,
-    attribution: '© Esri, US National Park Service',
-  },
-  dark: {
-    id: 'dark',
-    name: 'Dark Cyber',
-    icon: '🌌',
-    description: 'Mappa notturna scura ad alto contrasto con traccia neon',
-    getTileUrl: (z, x, y) =>
-      `https://basemaps.cartocdn.com/rastertiles/dark_all/${z}/${x}/${y}.png`,
-    attribution: '© OpenStreetMap contributors, © CARTO',
   },
 };
 
@@ -79,7 +43,7 @@ function mercatorToTile(mx, my, zoom) {
 }
 
 // Load Image with Promise, Timeout and CORS safety
-function loadImage(url, timeoutMs = 8000) {
+function loadImage(url, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -93,7 +57,7 @@ function loadImage(url, timeoutMs = 8000) {
       resolve(img);
     };
 
-    img.onerror = (e) => {
+    img.onerror = () => {
       clearTimeout(timer);
       reject(new Error(`Failed to load image ${url}`));
     };
@@ -103,14 +67,13 @@ function loadImage(url, timeoutMs = 8000) {
 }
 
 /**
- * Build a complete Three.js scene with 3D terrain mesh, map texture, track tube, and animated marker.
+ * Build a complete Three.js scene with 3D terrain mesh, ultra-sharp satellite texture, track tube, and animated marker.
  */
 export async function buildTerrainScene(trackPoints, options = {}, onProgress = () => {}) {
   const config = {
-    mapStyle: 'satellite',
-    heightExaggeration: 1.5,
+    heightExaggeration: 1.6,
     trackColor: '#14b8a6',
-    trackWidth: 2.0,
+    trackWidth: 2.2,
     padding: 0.35,
     ...options,
   };
@@ -119,7 +82,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     throw new Error('Traccia GPX non valida o con troppi pochi punti.');
   }
 
-  onProgress(5, 'Calcolo coordinate e bounding box...');
+  onProgress(5, 'Calcolo coordinate e perimetro ad alta risoluzione...');
 
   // 1. Calculate Track Mercator Bounds
   let minMx = Infinity, maxMx = -Infinity;
@@ -140,8 +103,8 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     return { ...p, mx: m.x, my: m.y, ele };
   });
 
-  const trackWidthM = Math.max(500, maxMx - minMx);
-  const trackHeightM = Math.max(500, maxMy - minMy);
+  const trackWidthM = Math.max(400, maxMx - minMx);
+  const trackHeightM = Math.max(400, maxMy - minMy);
   const maxSpanM = Math.max(trackWidthM, trackHeightM);
 
   // Add padding around the track
@@ -153,13 +116,14 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
   const totalSpanM = Math.max(boundMaxMx - boundMinMx, boundMaxMy - boundMinMy);
 
-  // 2. Select optimal zoom level based on area extent
-  let zoom = 12;
-  if (totalSpanM < 6000) zoom = 14;       // < 6km -> zoom 14 (~9m/px)
-  else if (totalSpanM < 18000) zoom = 13;  // < 18km -> zoom 13 (~19m/px)
-  else if (totalSpanM < 45000) zoom = 12;  // < 45km -> zoom 12 (~38m/px)
-  else if (totalSpanM < 120000) zoom = 11; // < 120km -> zoom 11 (~76m/px)
-  else zoom = 10;
+  // 2. Select High-Resolution Zoom Level
+  // We use 1-2 zoom levels higher than standard maps for maximum satellite crispness
+  let zoom = 13;
+  if (totalSpanM < 4000) zoom = 15;        // < 4km -> Zoom 15 (~4.7m/pixel max detail)
+  else if (totalSpanM < 12000) zoom = 14;   // < 12km -> Zoom 14 (~9.5m/pixel)
+  else if (totalSpanM < 30000) zoom = 13;   // < 30km -> Zoom 13 (~19m/pixel)
+  else if (totalSpanM < 80000) zoom = 12;   // < 80km -> Zoom 12 (~38m/pixel)
+  else zoom = 11;
 
   const tileSizeM = C_EARTH / Math.pow(2, zoom);
 
@@ -172,9 +136,9 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   let startTy = minTile.ty;
   let endTy = maxTile.ty;
 
-  // Safety limit: max 6x6 tiles (36 tiles)
-  if (endTx - startTx > 5) endTx = startTx + 5;
-  if (endTy - startTy > 5) endTy = startTy + 5;
+  // Max 8x8 tiles (64 tiles) for high performance without overloading memory
+  if (endTx - startTx > 7) endTx = startTx + 7;
+  if (endTy - startTy > 7) endTy = startTy + 7;
 
   const numTilesX = endTx - startTx + 1;
   const numTilesY = endTy - startTy + 1;
@@ -189,21 +153,18 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   const gridSpanX = gridMaxMx - gridMinMx;
   const gridSpanY = gridMaxMy - gridMinMy;
 
-  onProgress(15, `Scaricamento ${totalTiles} mappe e dati altimetrici...`);
+  onProgress(15, `Scaricamento ${totalTiles} immagini satellitari HD e quota altimetrica...`);
 
-  // 3. Load Map Tiles and DEM Elevation Tiles in Parallel
+  // 3. Load Map Tiles and DEM Elevation Tiles in Batches
   const mapCanvas = document.createElement('canvas');
   mapCanvas.width = numTilesX * 256;
   mapCanvas.height = numTilesY * 256;
   const mapCtx = mapCanvas.getContext('2d');
 
-  // Fill initial background with pleasing landscape tone
-  mapCtx.fillStyle = '#222831';
+  mapCtx.fillStyle = '#1e2430';
   mapCtx.fillRect(0, 0, mapCanvas.width, mapCanvas.height);
 
   const elevations = new Map();
-  const mapStyleObj = MAP_STYLES[config.mapStyle] || MAP_STYLES.satellite;
-
   let loadedCount = 0;
   const tileTasks = [];
 
@@ -215,24 +176,15 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
       const py = row * 256;
 
       const task = (async () => {
-        // A. Load Map Texture Tile
+        // A. Load Esri Satellite HD Tile
         try {
-          const url = mapStyleObj.getTileUrl(zoom, tx, ty);
+          const url = MAP_STYLES.satellite.getTileUrl(zoom, tx, ty);
           const img = await loadImage(url);
           mapCtx.drawImage(img, px, py, 256, 256);
         } catch (e) {
-          // Fallback to Esri satellite if other provider fails
-          try {
-            const fallbackUrl = MAP_STYLES.satellite.getTileUrl(zoom, tx, ty);
-            const fallbackImg = await loadImage(fallbackUrl);
-            mapCtx.drawImage(fallbackImg, px, py, 256, 256);
-          } catch (e2) {
-            // Draw subtle topographic placeholder grid
-            mapCtx.fillStyle = '#2d3748';
-            mapCtx.fillRect(px, py, 256, 256);
-            mapCtx.strokeStyle = '#4a5568';
-            mapCtx.strokeRect(px, py, 256, 256);
-          }
+          // Fallback to slight darker placeholder
+          mapCtx.fillStyle = '#263040';
+          mapCtx.fillRect(px, py, 256, 256);
         }
 
         // B. Load AWS Terrarium DEM Tile
@@ -260,7 +212,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
         loadedCount++;
         onProgress(
-          15 + Math.floor((loadedCount / totalTiles) * 45),
+          15 + Math.floor((loadedCount / totalTiles) * 50),
           `Scaricati tile ${loadedCount}/${totalTiles}...`
         );
       })();
@@ -271,9 +223,9 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
   await Promise.all(tileTasks);
 
-  onProgress(65, 'Generazione mesh 3D del terreno...');
+  onProgress(70, 'Costruzione terreno 3D ad alta definizione...');
 
-  // 4. Sample Elevation at any Web Mercator (mx, my)
+  // 4. Sample Elevation with Bilinear Interpolation for smooth mountain slopes
   const getElevationAtMercator = (mx, my) => {
     if (mx < gridMinMx || mx > gridMaxMx || my < gridMinMy || my > gridMaxMy) {
       return 0;
@@ -287,13 +239,32 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     const eleArray = elevations.get(`${tx}/${ty}`);
     if (!eleArray) return 0;
 
-    const inPx = Math.max(0, Math.min(255, Math.floor((px - tx) * 256)));
-    const inPy = Math.max(0, Math.min(255, Math.floor((py - ty) * 256)));
+    const exactX = (px - tx) * 255;
+    const exactY = (py - ty) * 255;
 
-    return eleArray[inPy * 256 + inPx] || 0;
+    const x0 = Math.max(0, Math.min(255, Math.floor(exactX)));
+    const x1 = Math.max(0, Math.min(255, x0 + 1));
+    const y0 = Math.max(0, Math.min(255, Math.floor(exactY)));
+    const y1 = Math.max(0, Math.min(255, y0 + 1));
+
+    const fx = exactX - x0;
+    const fy = exactY - y0;
+
+    const e00 = eleArray[y0 * 256 + x0] || 0;
+    const e10 = eleArray[y0 * 256 + x1] || 0;
+    const e01 = eleArray[y1 * 256 + x0] || 0;
+    const e11 = eleArray[y1 * 256 + x1] || 0;
+
+    // Bilinear interpolation
+    return (
+      e00 * (1 - fx) * (1 - fy) +
+      e10 * fx * (1 - fy) +
+      e01 * (1 - fx) * fy +
+      e11 * fx * fy
+    );
   };
 
-  // Find lowest elevation across the region to anchor base at Y=0
+  // Find lowest elevation across the region
   let lowestEle = Infinity;
   for (let ty = startTy; ty <= endTy; ty++) {
     for (let tx = startTx; tx <= endTx; tx++) {
@@ -310,14 +281,14 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   // 5. 3D World Space Dimensions
   const worldWidth = 1000;
   const worldHeight = worldWidth * (gridSpanY / gridSpanX);
-  const scale = worldWidth / gridSpanX; // 3D units per real meter
+  const scale = worldWidth / gridSpanX; // 3D units per meter
 
-  const segmentsX = Math.min(240, numTilesX * 48);
-  const segmentsY = Math.min(240, numTilesY * 48);
+  // High density subdivision for crisp mountain ridges
+  const segmentsX = Math.min(260, numTilesX * 45);
+  const segmentsY = Math.min(260, numTilesY * 45);
 
-  // PlaneGeometry lies on X-Y, rotated so X=East, Y=Up (elevation), Z=South
   const geometry = new THREE.PlaneGeometry(worldWidth, worldHeight, segmentsX, segmentsY);
-  geometry.rotateX(-Math.PI / 2); // Put on X-Z plane (X=East, Z=South, Y=Up)
+  geometry.rotateX(-Math.PI / 2); // Orient X=East, Z=South, Y=Up
 
   const posAttr = geometry.attributes.position;
 
@@ -325,12 +296,11 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     const vx = posAttr.getX(i);
     const vz = posAttr.getZ(i);
 
-    // Map vertex (vx, vz) to Mercator (mx, my)
-    const nx = (vx / worldWidth) + 0.5;   // 0 (West) to 1 (East)
-    const ny = (vz / worldHeight) + 0.5;  // 0 (North) to 1 (South)
+    const nx = (vx / worldWidth) + 0.5;
+    const ny = (vz / worldHeight) + 0.5;
 
     const mx = gridMinMx + nx * gridSpanX;
-    const my = gridMaxMy - ny * gridSpanY; // South has smaller Mercator Y
+    const my = gridMaxMy - ny * gridSpanY;
 
     const rawEle = getElevationAtMercator(mx, my);
     const clampedEle = Math.max(lowestEle, Math.min(8848, rawEle));
@@ -341,14 +311,13 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
   geometry.computeVertexNormals();
 
-  // Create CanvasTexture with exact orientation
+  // Create High-Definition Texture with Anisotropy Filtering
   const texture = new THREE.CanvasTexture(mapCanvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.generateMipmaps = true;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.anisotropy = 16; // Crisp rendering at sharp angles
 
   const terrainMaterial = new THREE.MeshStandardMaterial({
     map: texture,
@@ -361,7 +330,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   terrainMesh.receiveShadow = true;
   terrainMesh.castShadow = true;
 
-  onProgress(80, 'Creazione percorso 3D in rilievo...');
+  onProgress(85, 'Creazione percorso 3D in rilievo...');
 
   // 6. Project GPX Track to 3D World Space
   const track3dPoints = [];
@@ -376,12 +345,12 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
     const sampleEle = getElevationAtMercator(p.mx, p.my);
     const baseEle = sampleEle > 0 ? sampleEle : p.ele;
-    const vy = (baseEle - lowestEle) * scale * config.heightExaggeration + (config.trackWidth * 0.8);
+    const vy = (baseEle - lowestEle) * scale * config.heightExaggeration + (config.trackWidth * 0.7);
 
     const pt = new THREE.Vector3(vx, vy, vz);
 
-    // Deduplicate points closer than 0.8 units to avoid CatmullRom singularities
-    if (!lastVector || lastVector.distanceTo(pt) > 0.8) {
+    // Deduplicate points closer than 0.6 units to prevent curve glitches
+    if (!lastVector || lastVector.distanceTo(pt) > 0.6) {
       track3dPoints.push(pt);
       lastVector = pt;
     }
@@ -391,8 +360,8 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     track3dPoints.push(new THREE.Vector3(0, 2, 0));
   }
 
-  const trackCurve = new THREE.CatmullRomCurve3(track3dPoints, false, 'centripetal', 0.25);
-  const tubularSegments = Math.max(300, Math.min(3000, track3dPoints.length * 2));
+  const trackCurve = new THREE.CatmullRomCurve3(track3dPoints, false, 'centripetal', 0.2);
+  const tubularSegments = Math.max(300, Math.min(3500, track3dPoints.length * 3));
 
   const trackTubeGeom = new THREE.TubeGeometry(
     trackCurve,
@@ -405,9 +374,9 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   const trackMaterial = new THREE.MeshStandardMaterial({
     color: config.trackColor,
     emissive: config.trackColor,
-    emissiveIntensity: 0.5,
+    emissiveIntensity: 0.6,
     roughness: 0.2,
-    metalness: 0.6,
+    metalness: 0.5,
   });
 
   const trackMesh = new THREE.Mesh(trackTubeGeom, trackMaterial);
@@ -432,36 +401,36 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
   // 8. Construct Three.js Scene & Lighting
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color('#10141d');
-  scene.fog = new THREE.FogExp2('#1a2333', 0.0006);
+  scene.background = new THREE.Color('#0d1117');
+  scene.fog = new THREE.FogExp2('#161f2e', 0.0005);
 
   scene.add(terrainMesh);
   scene.add(trackMesh);
   scene.add(markerMesh);
 
   // Sunlight (Directional)
-  const sunLight = new THREE.DirectionalLight(0xfff5e6, 1.8);
-  sunLight.position.set(worldWidth * 0.4, worldHeight * 0.7, -worldWidth * 0.3);
+  const sunLight = new THREE.DirectionalLight(0xfffaed, 1.8);
+  sunLight.position.set(worldWidth * 0.35, worldHeight * 0.75, -worldWidth * 0.3);
   sunLight.castShadow = true;
   sunLight.shadow.mapSize.width = 2048;
   sunLight.shadow.mapSize.height = 2048;
   sunLight.shadow.camera.near = 10;
-  sunLight.shadow.camera.far = 4000;
+  sunLight.shadow.camera.far = 4500;
   sunLight.shadow.camera.left = -worldWidth;
   sunLight.shadow.camera.right = worldWidth;
   sunLight.shadow.camera.top = worldHeight;
   sunLight.shadow.camera.bottom = -worldHeight;
   scene.add(sunLight);
 
-  // Ambient & Atmospheric Light
-  const ambLight = new THREE.AmbientLight(0xdbeafe, 0.7);
+  // Ambient & Sky Dome Light
+  const ambLight = new THREE.AmbientLight(0xe0f2fe, 0.75);
   scene.add(ambLight);
 
-  const hemiLight = new THREE.HemisphereLight(0x93c5fd, 0x1e293b, 0.5);
+  const hemiLight = new THREE.HemisphereLight(0xbae6fd, 0x1e293b, 0.5);
   scene.add(hemiLight);
 
   // 9. Camera Setup
-  const camera = new THREE.PerspectiveCamera(45, 16 / 9, 1, 8000);
+  const camera = new THREE.PerspectiveCamera(45, 16 / 9, 1, 9000);
   camera.position.set(0, worldHeight * 0.6, worldHeight * 0.7);
   camera.lookAt(0, 0, 0);
 

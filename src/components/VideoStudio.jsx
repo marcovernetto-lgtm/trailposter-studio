@@ -4,8 +4,6 @@ import {
   Video,
   Camera,
   Mountain,
-  Map,
-  Timer,
   Download,
   Play,
   Pause,
@@ -19,6 +17,12 @@ import {
   Sparkles,
   RefreshCw,
   Compass,
+  Plus,
+  Trash2,
+  Key,
+  Layers,
+  Sliders,
+  Maximize2,
 } from 'lucide-react';
 import { buildTerrainScene, MAP_STYLES } from '../lib/terrainEngine';
 import { createCameraController, CAMERA_MODES, resetCameraState } from '../lib/cameraSystem';
@@ -39,20 +43,24 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
   const [sceneReady, setSceneReady] = useState(false);
   const [sceneError, setSceneError] = useState(null);
 
-  // Video & Visual Settings
-  const [mapStyle, setMapStyle] = useState('satellite');
-  const [cameraMode, setCameraMode] = useState('drone');
+  // Visual & Quality Settings
   const [heightExaggeration, setHeightExaggeration] = useState(1.6);
   const [trackColor, setTrackColor] = useState(config?.trackColor || '#14b8a6');
   const [trackWidth, setTrackWidth] = useState(2.2);
   const [duration, setDuration] = useState(30);
   const [aspectRatio, setAspectRatio] = useState('16:9');
 
-  // Preview & Animation State
+  // Camera & Director Mode
+  const [directorType, setDirectorType] = useState('auto'); // 'auto' | 'keyframe'
+  const [cameraMode, setCameraMode] = useState('drone'); // 'drone', 'eagle', 'cinematic', etc.
+  const [keyframes, setKeyframes] = useState([]);
+  const [selectedKeyframeId, setSelectedKeyframeId] = useState(null);
+
+  // Preview & Timeline State
   const [previewProgress, setPreviewProgress] = useState(0);
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
   const previewStartTimeRef = useRef(null);
-  const isUserInteractingRef = useRef(false);
+  const isUserOrbitingRef = useRef(false);
 
   // Video Export State
   const [isExporting, setIsExporting] = useState(false);
@@ -69,7 +77,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
     setIsBuilding(true);
     setBuildProgress(0);
-    setBuildMessage('Inizializzazione motore 3D...');
+    setBuildMessage('Inizializzazione satellite HD...');
     setSceneReady(false);
     setSceneError(null);
 
@@ -87,7 +95,6 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       const sceneData = await buildTerrainScene(
         points,
         {
-          mapStyle,
           heightExaggeration,
           trackColor,
           trackWidth,
@@ -104,6 +111,11 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       // Initialize Camera Controller
       const ctrl = createCameraController(sceneData.trackCurve, sceneData.worldBounds);
       cameraCtrlRef.current = ctrl;
+
+      // Set initial auto keyframes if empty
+      if (keyframes.length === 0) {
+        setKeyframes(ctrl.generateAutoKeyframes());
+      }
 
       // Initialize WebGL Renderer
       const container = containerRef.current;
@@ -131,7 +143,8 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       }
 
       // Position camera at start
-      ctrl.updateCamera(sceneData.camera, 0, cameraMode);
+      const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
+      ctrl.updateCamera(sceneData.camera, 0, activeMode, keyframes);
 
       setSceneReady(true);
       setPreviewProgress(0);
@@ -151,9 +164,9 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     } finally {
       setIsBuilding(false);
     }
-  }, [points, mapStyle, heightExaggeration, trackColor, trackWidth]);
+  }, [points, heightExaggeration, trackColor, trackWidth]);
 
-  // Initial load & trigger build on point/style changes
+  // Initial load & trigger build on point/elevation changes
   useEffect(() => {
     if (points.length >= 2) {
       buildScene();
@@ -161,7 +174,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     return () => {
       if (animIdRef.current) cancelAnimationFrame(animIdRef.current);
     };
-  }, [points, mapStyle, heightExaggeration, trackColor, trackWidth]);
+  }, [points, heightExaggeration, trackColor, trackWidth]);
 
   // Responsive Canvas Resize Observer
   useEffect(() => {
@@ -183,18 +196,20 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     return () => resizeObserver.disconnect();
   }, []);
 
-  // Mouse Orbit & Drag Controls for 3D Viewport
+  // Interactive 3D Orbit, Pan & Zoom Controls for Manual Camera Framing
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     let isDragging = false;
+    let dragButton = 0; // 0 = left (orbit), 2 = right (pan)
     let prevMouse = { x: 0, y: 0 };
 
     const onMouseDown = (e) => {
       if (e.target.tagName.toLowerCase() === 'button' || e.target.tagName.toLowerCase() === 'input') return;
       isDragging = true;
-      isUserInteractingRef.current = true;
+      dragButton = e.button;
+      isUserOrbitingRef.current = true;
       prevMouse = { x: e.clientX, y: e.clientY };
     };
 
@@ -205,9 +220,19 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       prevMouse = { x: e.clientX, y: e.clientY };
 
       const camera = sceneDataRef.current.camera;
-      // Orbit around current look target
-      camera.position.x -= dx * 0.8;
-      camera.position.y += dy * 0.8;
+
+      if (dragButton === 0) {
+        // Left Drag: Orbit around track target
+        const rotSpeed = 0.005;
+        const currentPos = camera.position.clone();
+        camera.position.x = currentPos.x * Math.cos(dx * rotSpeed) - currentPos.z * Math.sin(dx * rotSpeed);
+        camera.position.z = currentPos.x * Math.sin(dx * rotSpeed) + currentPos.z * Math.cos(dx * rotSpeed);
+        camera.position.y = Math.max(10, currentPos.y + dy * 0.8);
+      } else {
+        // Right Drag / Pan: Lateral move
+        camera.position.x -= dx * 0.6;
+        camera.position.z -= dy * 0.6;
+      }
     };
 
     const onMouseUp = () => {
@@ -218,19 +243,24 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       if (!sceneDataRef.current) return;
       e.preventDefault();
       const camera = sceneDataRef.current.camera;
-      camera.position.y = Math.max(10, camera.position.y + e.deltaY * 0.5);
+      const zoomFactor = e.deltaY * 0.3;
+      camera.position.y = Math.max(8, camera.position.y + zoomFactor);
     };
+
+    const onContextMenu = (e) => e.preventDefault();
 
     container.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     container.addEventListener('wheel', onWheel, { passive: false });
+    container.addEventListener('contextmenu', onContextMenu);
 
     return () => {
       container.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
       container.removeEventListener('wheel', onWheel);
+      container.removeEventListener('contextmenu', onContextMenu);
     };
   }, []);
 
@@ -241,13 +271,15 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     let localAnimId;
     previewStartTimeRef.current = Date.now() - previewProgress * duration * 1000;
 
+    const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
+
     const loop = () => {
       const elapsed = (Date.now() - previewStartTimeRef.current) / 1000;
       const t = Math.min(elapsed / duration, 1.0);
 
       setPreviewProgress(t);
       sceneDataRef.current.updateProgress(t);
-      cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, t, cameraMode);
+      cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, t, activeMode, keyframes);
 
       if (t >= 1.0) {
         setIsPreviewPlaying(false);
@@ -259,7 +291,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
     localAnimId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(localAnimId);
-  }, [isPreviewPlaying, cameraMode, duration]);
+  }, [isPreviewPlaying, cameraMode, directorType, keyframes, duration]);
 
   // Scrubbing Timeline Slider
   const handleScrub = (val) => {
@@ -267,18 +299,70 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     setPreviewProgress(val);
     if (sceneDataRef.current && cameraCtrlRef.current) {
       sceneDataRef.current.updateProgress(val);
-      cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, val, cameraMode);
+      const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
+      cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, val, activeMode, keyframes);
     }
   };
 
-  // Switch Camera Mode
+  // Switch Camera Preset
   const handleCameraModeChange = (mode) => {
+    setDirectorType('auto');
     setCameraMode(mode);
     if (cameraCtrlRef.current) {
       resetCameraState(cameraCtrlRef.current);
       if (sceneDataRef.current) {
-        cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, previewProgress, mode);
+        cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, previewProgress, mode, keyframes);
       }
+    }
+  };
+
+  // Add Keyframe at Current Scrubber Position with Current 3D Camera View
+  const handleAddKeyframe = () => {
+    if (!sceneDataRef.current) return;
+
+    const camera = sceneDataRef.current.camera;
+    const currentTrackPt = sceneDataRef.current.trackCurve.getPointAt(Math.min(0.999, previewProgress));
+
+    const newKf = {
+      id: `kf-${Date.now()}`,
+      t: parseFloat(previewProgress.toFixed(3)),
+      name: `Scena a ${(previewProgress * duration).toFixed(0)}s`,
+      position: camera.position.clone(),
+      lookAt: currentTrackPt.clone(),
+    };
+
+    const updated = [...keyframes.filter((k) => Math.abs(k.t - previewProgress) > 0.02), newKf].sort(
+      (a, b) => a.t - b.t
+    );
+
+    setKeyframes(updated);
+    setDirectorType('keyframe');
+    setSelectedKeyframeId(newKf.id);
+  };
+
+  // Remove Selected Keyframe
+  const handleRemoveKeyframe = (id) => {
+    const updated = keyframes.filter((k) => k.id !== id);
+    setKeyframes(updated);
+    if (selectedKeyframeId === id) setSelectedKeyframeId(null);
+  };
+
+  // Go to Keyframe Position
+  const handleJumpToKeyframe = (kf) => {
+    handleScrub(kf.t);
+    setSelectedKeyframeId(kf.id);
+    if (sceneDataRef.current) {
+      sceneDataRef.current.camera.position.copy(kf.position);
+      sceneDataRef.current.camera.lookAt(kf.lookAt);
+    }
+  };
+
+  // Reset to Auto Generated Keyframes
+  const handleResetToAutoKeyframes = () => {
+    if (cameraCtrlRef.current) {
+      const generated = cameraCtrlRef.current.generateAutoKeyframes();
+      setKeyframes(generated);
+      setDirectorType('keyframe');
     }
   };
 
@@ -302,11 +386,12 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     if (cameraCtrlRef.current) resetCameraState(cameraCtrlRef.current);
     if (sceneDataRef.current && cameraCtrlRef.current) {
       sceneDataRef.current.updateProgress(0);
-      cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, 0, cameraMode);
+      const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
+      cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, 0, activeMode, keyframes);
     }
   };
 
-  // Video Export Handler (WebCodecs MP4)
+  // Video Export Handler (WebCodecs MP4 1080p)
   const handleExport = async () => {
     if (!sceneDataRef.current || !rendererRef.current) return;
 
@@ -319,7 +404,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
     setIsExporting(true);
     setExportProgress(0);
-    setExportMessage('Inizializzazione rendering...');
+    setExportMessage('Inizializzazione rendering 1080p...');
     setExportError(null);
     setExportedUrl(null);
     setIsPreviewPlaying(false);
@@ -327,6 +412,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     if (cameraCtrlRef.current) resetCameraState(cameraCtrlRef.current);
 
     const [w, h] = aspectRatio === '9:16' ? [1080, 1920] : [1920, 1080];
+    const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
 
     try {
       const blobUrl = await exportVideo({
@@ -335,7 +421,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
         camera: sceneDataRef.current.camera,
         updateFrame: (progress) => {
           sceneDataRef.current.updateProgress(progress);
-          cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, progress, cameraMode);
+          cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, progress, activeMode, keyframes);
         },
         options: {
           width: w,
@@ -402,75 +488,151 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
       {/* Sidebar Controls (Left - 4 Cols on LG) */}
       <div className="lg:col-span-4 h-[calc(100vh-100px)] sticky top-20 flex flex-col space-y-3.5 overflow-y-auto custom-scrollbar pr-1">
-        {/* Card 1: Stile Mappa Terreno */}
+        {/* Card 1: Satellite HD Badge & Reload */}
+        <div className="glass-card p-3.5 rounded-2xl border border-teal-500/30 bg-[#181a20]/95 shadow-lg flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl">🛰️</span>
+            <div>
+              <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                Satellite HD Max Resolution
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              </h3>
+              <p className="text-[10px] text-teal-300">Texture fotorealistica con filtro anisotropico 16×</p>
+            </div>
+          </div>
+          <button
+            onClick={buildScene}
+            disabled={isBuilding}
+            className="text-neutral-400 hover:text-teal-300 transition-colors p-1.5 rounded-lg hover:bg-white/5"
+            title="Ricarica Terreno 3D"
+          >
+            <RefreshCw className={`w-4 h-4 ${isBuilding ? 'animate-spin text-teal-400' : ''}`} />
+          </button>
+        </div>
+
+        {/* Card 2: Regia Telecamera (Automatica vs Keyframe Manuale) */}
         <div className="glass-card p-4 rounded-2xl border border-white/10 space-y-3 bg-[#181a20]/95 shadow-lg">
           <div className="flex items-center justify-between border-b border-white/5 pb-2">
             <div className="flex items-center gap-2">
-              <Map className="w-4 h-4 text-teal-400" />
+              <Camera className="w-4 h-4 text-teal-400" />
               <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-200">
-                Stile Mappa Satellitare / Topografica
+                Regia Telecamera
               </h3>
             </div>
-            <button
-              onClick={buildScene}
-              disabled={isBuilding}
-              className="text-neutral-400 hover:text-teal-300 transition-colors p-1"
-              title="Ricarica Mappa 3D"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isBuilding ? 'animate-spin text-teal-400' : ''}`} />
-            </button>
-          </div>
 
-          <div className="grid grid-cols-1 gap-2">
-            {Object.entries(MAP_STYLES).map(([key, style]) => (
+            {/* Switcher Automatica vs Manuale */}
+            <div className="flex items-center bg-black/40 p-0.5 rounded-lg border border-white/10 text-[10px] font-bold">
               <button
-                key={key}
-                onClick={() => setMapStyle(key)}
-                className={`flex items-start gap-2.5 p-2.5 rounded-xl text-left transition-all border ${
-                  mapStyle === key
-                    ? 'border-teal-500 bg-teal-500/15 text-teal-200 ring-1 ring-teal-500/30'
-                    : 'border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10'
+                onClick={() => setDirectorType('auto')}
+                className={`px-2 py-1 rounded-md transition-all ${
+                  directorType === 'auto'
+                    ? 'bg-teal-600 text-white shadow'
+                    : 'text-neutral-400 hover:text-white'
                 }`}
               >
-                <span className="text-xl mt-0.5">{style.icon}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-bold text-white">{style.name}</p>
-                    {mapStyle === key && <Check className="w-3.5 h-3.5 text-teal-400" />}
+                Auto Preset
+              </button>
+              <button
+                onClick={() => setDirectorType('keyframe')}
+                className={`px-2 py-1 rounded-md transition-all ${
+                  directorType === 'keyframe'
+                    ? 'bg-teal-600 text-white shadow'
+                    : 'text-neutral-400 hover:text-white'
+                }`}
+              >
+                Keyframe 🎬
+              </button>
+            </div>
+          </div>
+
+          {directorType === 'auto' ? (
+            /* Modalità Automatiche Fluidissime */
+            <div className="grid grid-cols-2 gap-2">
+              {Object.entries(CAMERA_MODES)
+                .filter(([k]) => k !== 'keyframe')
+                .map(([key, mode]) => (
+                  <button
+                    key={key}
+                    onClick={() => handleCameraModeChange(key)}
+                    className={`p-2.5 rounded-xl text-left transition-all border ${
+                      cameraMode === key
+                        ? 'border-teal-500 bg-teal-500/20 text-teal-200 ring-1 ring-teal-500/30'
+                        : 'border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10'
+                    }`}
+                  >
+                    <div className="text-lg mb-0.5">{mode.icon}</div>
+                    <p className="text-xs font-bold text-white">{mode.name}</p>
+                    <p className="text-[9px] text-neutral-400 leading-tight mt-0.5">{mode.description}</p>
+                  </button>
+                ))}
+            </div>
+          ) : (
+            /* Modalità Regia Manuale con Keyframe */
+            <div className="space-y-3 animate-fadeIn">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-neutral-300 font-semibold flex items-center gap-1.5">
+                  <Key className="w-3.5 h-3.5 text-amber-400" />
+                  Keyframe sulla Timeline ({keyframes.length})
+                </span>
+                <button
+                  onClick={handleResetToAutoKeyframes}
+                  className="text-[10px] text-teal-300 hover:underline"
+                >
+                  Genera 5 Punti Base
+                </button>
+              </div>
+
+              {/* Add Keyframe Button */}
+              <button
+                onClick={handleAddKeyframe}
+                className="w-full flex items-center justify-center gap-2 p-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white text-xs font-bold shadow-lg transition-all active:scale-98"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Salva Inquadratura Corrente a {(previewProgress * duration).toFixed(0)}s</span>
+              </button>
+
+              {/* Keyframe List */}
+              <div className="space-y-1.5 max-h-36 overflow-y-auto custom-scrollbar pr-1">
+                {keyframes.map((kf, idx) => (
+                  <div
+                    key={kf.id}
+                    onClick={() => handleJumpToKeyframe(kf)}
+                    className={`flex items-center justify-between p-2 rounded-xl border text-xs cursor-pointer transition-all ${
+                      selectedKeyframeId === kf.id
+                        ? 'border-amber-400 bg-amber-500/15 text-amber-200'
+                        : 'border-white/5 bg-white/5 text-neutral-300 hover:bg-white/10'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-300 flex items-center justify-center font-mono font-bold text-[10px]">
+                        {idx + 1}
+                      </span>
+                      <div>
+                        <p className="font-semibold text-white text-[11px]">{kf.name}</p>
+                        <p className="text-[9px] text-neutral-400 font-mono">
+                          Tempo: {(kf.t * duration).toFixed(1)}s ({(kf.t * 100).toFixed(0)}%)
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRemoveKeyframe(kf.id);
+                      }}
+                      className="p-1 text-neutral-500 hover:text-red-400 transition-colors"
+                      title="Elimina keyframe"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
-                  <p className="text-[10px] text-neutral-400 truncate">{style.description}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
+                ))}
+              </div>
 
-        {/* Card 2: Modalità Telecamera Cinematografica */}
-        <div className="glass-card p-4 rounded-2xl border border-white/10 space-y-3 bg-[#181a20]/95 shadow-lg">
-          <div className="flex items-center gap-2 border-b border-white/5 pb-2">
-            <Camera className="w-4 h-4 text-teal-400" />
-            <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-200">
-              Regia Telecamera (6 Modalità)
-            </h3>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            {Object.entries(CAMERA_MODES).map(([key, mode]) => (
-              <button
-                key={key}
-                onClick={() => handleCameraModeChange(key)}
-                className={`p-2.5 rounded-xl text-left transition-all border ${
-                  cameraMode === key
-                    ? 'border-teal-500 bg-teal-500/20 text-teal-200 ring-1 ring-teal-500/30'
-                    : 'border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10'
-                }`}
-              >
-                <div className="text-lg mb-0.5">{mode.icon}</div>
-                <p className="text-xs font-bold text-white">{mode.name}</p>
-                <p className="text-[9px] text-neutral-400 leading-tight mt-0.5">{mode.description}</p>
-              </button>
-            ))}
-          </div>
+              <p className="text-[9px] text-neutral-400 italic">
+                💡 Muovi la visuale con il mouse nella finestra 3D per inquadrare, sposta la timeline e premi "Salva Inquadratura".
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Card 3: Rilievo Altimetrico & Traccia 3D */}
@@ -498,7 +660,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
               className="w-full accent-teal-500 bg-neutral-800 rounded-lg h-1.5 cursor-pointer"
             />
             <p className="text-[9px] text-neutral-500">
-              1.0× = Proporzioni naturali reali • 1.6×-2.5× = Rilievo spettacolare
+              1.0× = Proporzioni naturali reali • 1.6×-2.5× = Rilievo montuoso cinematografico
             </p>
           </div>
 
@@ -690,7 +852,9 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
           <div className="glass-panel-subtle px-3.5 py-1.5 rounded-full border border-white/10 pointer-events-auto flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
             <span className="text-xs font-mono tracking-wider text-neutral-200 uppercase">
-              3D Flyover Studio • {CAMERA_MODES[cameraMode]?.name || 'Drone'}
+              {directorType === 'keyframe'
+                ? `Regia Keyframe (${keyframes.length} scene)`
+                : `Regia Auto • ${CAMERA_MODES[cameraMode]?.name}`}
             </span>
           </div>
 
@@ -715,7 +879,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
                 <Loader2 className="w-7 h-7 animate-spin" />
               </div>
               <div>
-                <p className="text-sm font-bold text-white mb-1">Caricamento Terreno 3D</p>
+                <p className="text-sm font-bold text-white mb-1">Caricamento Satellite HD</p>
                 <p className="text-xs text-neutral-400">{buildMessage}</p>
               </div>
               <div className="w-48 bg-neutral-800 rounded-full h-1.5 overflow-hidden">
@@ -771,7 +935,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
           </div>
         )}
 
-        {/* 3D WebGL Canvas Container - Always rendered with dimensions */}
+        {/* 3D WebGL Canvas Container */}
         <div
           ref={containerRef}
           className="w-full h-[calc(100vh-140px)] min-h-[500px] cursor-grab active:cursor-grabbing flex items-center justify-center"
@@ -780,18 +944,9 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
         {/* Bottom Playback & Scrubber Controls */}
         {sceneReady && !isBuilding && (
           <div className="absolute bottom-0 left-0 right-0 z-20 p-4 bg-gradient-to-t from-[#10141d]/95 via-[#10141d]/70 to-transparent backdrop-blur-sm">
-            <div className="flex items-center gap-3 max-w-2xl mx-auto bg-black/60 p-2 px-3 rounded-2xl border border-white/10 shadow-2xl">
-              {/* Play / Pause Button */}
-              <button
-                onClick={togglePlay}
-                className="w-9 h-9 rounded-xl bg-teal-600 hover:bg-teal-500 text-white flex items-center justify-center shadow-lg transition-all active:scale-90 flex-shrink-0"
-                title={isPreviewPlaying ? 'Metti in pausa' : 'Riproduci anteprima'}
-              >
-                {isPreviewPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
-              </button>
-
-              {/* Timeline Scrubber */}
-              <div className="flex-1 flex flex-col justify-center space-y-1">
+            <div className="flex flex-col gap-2 max-w-3xl mx-auto bg-black/70 p-3 rounded-2xl border border-white/10 shadow-2xl">
+              {/* Timeline with Keyframe Visual Markers */}
+              <div className="relative w-full flex items-center">
                 <input
                   type="range"
                   min="0"
@@ -799,14 +954,51 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
                   step="0.001"
                   value={previewProgress}
                   onChange={(e) => handleScrub(parseFloat(e.target.value))}
-                  className="w-full accent-teal-500 bg-neutral-800 rounded-lg h-1.5 cursor-pointer"
+                  className="w-full accent-teal-500 bg-neutral-800 rounded-lg h-2 cursor-pointer z-10"
                 />
+
+                {/* Keyframe Visual Pins on Timeline */}
+                {directorType === 'keyframe' && (
+                  <div className="absolute inset-x-0 top-0 bottom-0 pointer-events-none flex items-center">
+                    {keyframes.map((kf) => (
+                      <div
+                        key={kf.id}
+                        style={{ left: `${kf.t * 100}%` }}
+                        className={`absolute w-3 h-3 -ml-1.5 rounded-full border-2 transform transition-transform ${
+                          selectedKeyframeId === kf.id
+                            ? 'bg-amber-400 border-white scale-125 z-20'
+                            : 'bg-amber-500 border-black/80 scale-100 z-10'
+                        }`}
+                        title={`${kf.name} (${(kf.t * duration).toFixed(0)}s)`}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* Time Counter */}
-              <span className="text-xs font-mono text-neutral-300 w-16 text-right flex-shrink-0">
-                {Math.floor(previewProgress * duration)}s / {duration}s
-              </span>
+              {/* Bottom Playback Buttons & Time Display */}
+              <div className="flex items-center justify-between pt-1">
+                <div className="flex items-center gap-3">
+                  {/* Play / Pause Button */}
+                  <button
+                    onClick={togglePlay}
+                    className="w-9 h-9 rounded-xl bg-teal-600 hover:bg-teal-500 text-white flex items-center justify-center shadow-lg transition-all active:scale-90 flex-shrink-0"
+                    title={isPreviewPlaying ? 'Metti in pausa' : 'Riproduci anteprima'}
+                  >
+                    {isPreviewPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+                  </button>
+
+                  <span className="text-xs font-mono text-neutral-300 font-bold">
+                    {Math.floor(previewProgress * duration)}s / {duration}s
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-neutral-400 hidden sm:inline">
+                    🖱️ Tasto Sinistro: Ruota 3D • Tasto Destro: Sposta • Rotella: Zoom
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         )}
