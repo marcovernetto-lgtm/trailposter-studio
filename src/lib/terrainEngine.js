@@ -86,69 +86,101 @@ async function asyncPool(poolLimit, array, iteratorFn) {
 }
 
 /**
- * Creates a high-definition 2D canvas texture for a 3D waypoint placard / signboard
+ * Draw custom rounded rectangle with clean corners
  */
-function createWaypointPlacardTexture(name, index = 1) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 128;
-  const ctx = canvas.getContext('2d');
-
-  // Background rounded card with subtle glass gradient
-  const r = 28;
-  const x = 10;
-  const y = 10;
-  const w = canvas.width - 20;
-  const h = canvas.height - 20;
-
-  // Background fill & border
-  ctx.fillStyle = 'rgba(10, 14, 20, 0.90)';
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
-  ctx.lineWidth = 4;
-
+function drawRoundedRect(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
   ctx.beginPath();
   ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
   ctx.lineTo(x, y + r);
   ctx.quadraticCurveTo(x, y, x + r, y);
   ctx.closePath();
+}
+
+/**
+ * Creates a dynamic content-aware 2D canvas texture for a 3D waypoint placard / signboard.
+ * Exactly fitted to the place name width with centered content and no wasted empty space!
+ */
+function createWaypointPlacardTexture(name, index = 1) {
+  const displayText = (name || `Tappa ${index}`).trim();
+
+  // 1. Measure text width accurately
+  const tempCanvas = document.createElement('canvas');
+  const tempCtx = tempCanvas.getContext('2d');
+  const font = 'bold 28px "Outfit", system-ui, -apple-system, sans-serif';
+  tempCtx.font = font;
+  const metrics = tempCtx.measureText(displayText);
+  const textWidth = Math.ceil(metrics.width);
+
+  const height = 72;
+  const paddingX = 18;
+  const badgeRadius = 18;
+  const badgeWidth = badgeRadius * 2;
+  const gap = 12;
+
+  // Dynamic width fitted strictly to content
+  const totalContentWidth = badgeWidth + gap + textWidth;
+  const width = Math.max(90, Math.ceil(totalContentWidth + paddingX * 2));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+
+  const borderWidth = 3;
+  const x = borderWidth;
+  const y = borderWidth;
+  const w = width - borderWidth * 2;
+  const h = height - borderWidth * 2;
+  const pillRadius = h / 2;
+
+  // Frosted dark pill background
+  drawRoundedRect(ctx, x, y, w, h, pillRadius);
+  ctx.fillStyle = 'rgba(10, 14, 20, 0.92)';
   ctx.fill();
+  ctx.lineWidth = borderWidth;
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
   ctx.stroke();
 
+  // Center all content inside the pill
+  const startX = (width - totalContentWidth) / 2;
+
   // Index Badge (Teal circle with clean number)
+  const badgeCenterX = startX + badgeRadius;
+  const badgeCenterY = height / 2;
   ctx.fillStyle = '#14b8a6';
   ctx.beginPath();
-  ctx.arc(x + 48, y + h / 2, 24, 0, Math.PI * 2);
+  ctx.arc(badgeCenterX, badgeCenterY, badgeRadius, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 24px "Outfit", sans-serif';
+  ctx.font = 'bold 20px "Outfit", system-ui, -apple-system, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(`${index}`, x + 48, y + h / 2 + 1);
+  ctx.fillText(`${index}`, badgeCenterX, badgeCenterY + 1);
 
-  // Placard Text (Name of place)
+  // Place Name Text
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 30px "Outfit", sans-serif';
+  ctx.font = font;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-
-  let displayText = name || `Tappa ${index}`;
-  if (displayText.length > 20) {
-    displayText = displayText.substring(0, 19) + '…';
-  }
-  ctx.fillText(displayText, x + 88, y + h / 2);
+  ctx.fillText(displayText, startX + badgeWidth + gap, height / 2);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
-  return texture;
+
+  return {
+    texture,
+    aspectRatio: width / height,
+  };
 }
 
 /**
@@ -239,7 +271,7 @@ function createConformalFlatRibbonGeometry(
 export async function buildTerrainScene(trackPoints, options = {}, onProgress = () => {}) {
   const config = {
     heightExaggeration: 1.6,
-    trackColor: '#facc15',
+    trackColor: '#facc15', // Default: Yellow
     trackWidth: 1.4, // Wide flat ribbon width
     padding: 0.20, // 20% framing padding
     quality: 'ultra', // 'ultra' | 'high' | 'standard'
@@ -608,7 +640,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   markerMesh.castShadow = true;
   markerMesh.renderOrder = 20;
 
-  // 8. 3D Waypoint Signs / Placards (Cartelli 3D più grandi, nitidi e posizionati con precisione)
+  // 8. 3D Waypoint Signs / Placards (Cartelli 3D dinamici, perfettamente sagomati e centrati sul testo!)
   const waypointsGroup = new THREE.Group();
   const waypointDisposables = [];
 
@@ -626,7 +658,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     const baseY = Math.max(pt.y, groundY);
 
     // A. Ground Base Ring
-    const baseGeom = new THREE.CylinderGeometry(2.0, 2.0, 0.35, 16);
+    const baseGeom = new THREE.CylinderGeometry(1.8, 1.8, 0.35, 16);
     const baseMat = new THREE.MeshStandardMaterial({
       color: '#14b8a6',
       emissive: '#14b8a6',
@@ -638,7 +670,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     waypointDisposables.push(baseGeom, baseMat);
 
     // B. Slim Vertical Pin Pole
-    const poleHeight = 16;
+    const poleHeight = 15;
     const poleGeom = new THREE.CylinderGeometry(0.35, 0.35, poleHeight, 8);
     const poleMat = new THREE.MeshStandardMaterial({
       color: '#94a3b8',
@@ -650,16 +682,20 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     waypointsGroup.add(poleMesh);
     waypointDisposables.push(poleGeom, poleMat);
 
-    // C. 3D Billboard Placard (Ingrandito per massima leggibilità da ogni angolazione)
-    const placardTexture = createWaypointPlacardTexture(wpt.name, index + 1);
+    // C. 3D Billboard Placard (Dynamic Content-Aware Fit with Centered Content)
+    const { texture: placardTexture, aspectRatio } = createWaypointPlacardTexture(wpt.name, index + 1);
     const spriteMat = new THREE.SpriteMaterial({
       map: placardTexture,
       transparent: true,
       depthTest: true,
     });
     const sprite = new THREE.Sprite(spriteMat);
-    sprite.position.set(pt.x, baseY + poleHeight + 5.5, pt.z);
-    sprite.scale.set(28, 7.0, 1);
+
+    const signHeight = 6.2;
+    const signWidth = signHeight * aspectRatio;
+
+    sprite.scale.set(signWidth, signHeight, 1);
+    sprite.position.set(pt.x, baseY + poleHeight + signHeight * 0.5 + 1.2, pt.z);
     sprite.renderOrder = 30;
 
     waypointsGroup.add(sprite);
