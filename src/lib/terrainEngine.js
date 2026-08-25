@@ -86,24 +86,25 @@ async function asyncPool(poolLimit, array, iteratorFn) {
 }
 
 /**
- * Creates a clean, minimal 2D canvas texture for a 3D waypoint placard / sign
+ * Creates a high-definition 2D canvas texture for a 3D waypoint placard / signboard
  */
 function createWaypointPlacardTexture(name, index = 1) {
   const canvas = document.createElement('canvas');
-  canvas.width = 384;
-  canvas.height = 96;
+  canvas.width = 512;
+  canvas.height = 128;
   const ctx = canvas.getContext('2d');
 
-  // Background rounded pill
-  const r = 24;
-  const x = 8;
-  const y = 8;
-  const w = canvas.width - 16;
-  const h = canvas.height - 16;
+  // Background rounded card with subtle glass gradient
+  const r = 28;
+  const x = 10;
+  const y = 10;
+  const w = canvas.width - 20;
+  const h = canvas.height - 20;
 
-  ctx.fillStyle = 'rgba(10, 14, 20, 0.88)';
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
-  ctx.lineWidth = 3;
+  // Background fill & border
+  ctx.fillStyle = 'rgba(10, 14, 20, 0.90)';
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+  ctx.lineWidth = 4;
 
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -119,30 +120,29 @@ function createWaypointPlacardTexture(name, index = 1) {
   ctx.fill();
   ctx.stroke();
 
-  // Index Badge
+  // Index Badge (Teal circle with clean number)
   ctx.fillStyle = '#14b8a6';
   ctx.beginPath();
-  ctx.arc(x + 36, y + h / 2, 18, 0, Math.PI * 2);
+  ctx.arc(x + 48, y + h / 2, 24, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 20px "Outfit", sans-serif';
+  ctx.font = 'bold 24px "Outfit", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(`${index}`, x + 36, y + h / 2);
+  ctx.fillText(`${index}`, x + 48, y + h / 2 + 1);
 
-  // Placard Text
+  // Placard Text (Name of place)
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 24px "Outfit", sans-serif';
+  ctx.font = 'bold 30px "Outfit", sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
 
-  // Truncate text if too long
   let displayText = name || `Tappa ${index}`;
-  if (displayText.length > 18) {
-    displayText = displayText.substring(0, 17) + '…';
+  if (displayText.length > 20) {
+    displayText = displayText.substring(0, 19) + '…';
   }
-  ctx.fillText(displayText, x + 68, y + h / 2);
+  ctx.fillText(displayText, x + 88, y + h / 2);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -234,7 +234,7 @@ function createConformalFlatRibbonGeometry(
 
 /**
  * Build a complete Three.js scene with ultra-crisp 4K UHD 3D terrain mesh,
- * guaranteed 100% full map coverage, flat ribbon track, and 3D waypoint placards.
+ * guaranteed 100% full map coverage, flat ribbon track, and prominent 3D waypoint signs.
  */
 export async function buildTerrainScene(trackPoints, options = {}, onProgress = () => {}) {
   const config = {
@@ -533,7 +533,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   terrainMesh.castShadow = true;
   terrainMesh.renderOrder = 0;
 
-  onProgress(88, 'Creazione percorso GPX e cartelli 3D delle tappe...');
+  onProgress(88, 'Creazione percorso GPX e cartelli 3D...');
 
   // 6. Project GPX Track to 3D World Space with Exact Ground Conformance
   const track3dPoints = [];
@@ -608,7 +608,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   markerMesh.castShadow = true;
   markerMesh.renderOrder = 20;
 
-  // 8. 3D Waypoint Signs / Placards (Cartelli 3D minimali)
+  // 8. 3D Waypoint Signs / Placards (Cartelli 3D più grandi, nitidi e posizionati con precisione)
   const waypointsGroup = new THREE.Group();
   const waypointDisposables = [];
 
@@ -617,13 +617,16 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   waypointsList.forEach((wpt, index) => {
     if (!wpt || !wpt.name) return;
 
-    const t = Math.max(0, Math.min(1, (wpt.percent || 50) / 100));
+    // Handle percent 0 properly (avoid 0 || 50 bug)
+    const rawPercent = wpt.percent != null && !isNaN(wpt.percent) ? Number(wpt.percent) : 0;
+    const t = Math.max(0, Math.min(1, rawPercent / 100));
+
     const pt = trackCurve.getPointAt(Math.min(0.999, t));
     const groundY = getGroundYAt(pt.x, pt.z);
     const baseY = Math.max(pt.y, groundY);
 
     // A. Ground Base Ring
-    const baseGeom = new THREE.CylinderGeometry(1.6, 1.6, 0.3, 16);
+    const baseGeom = new THREE.CylinderGeometry(2.0, 2.0, 0.35, 16);
     const baseMat = new THREE.MeshStandardMaterial({
       color: '#14b8a6',
       emissive: '#14b8a6',
@@ -635,8 +638,8 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     waypointDisposables.push(baseGeom, baseMat);
 
     // B. Slim Vertical Pin Pole
-    const poleHeight = 14;
-    const poleGeom = new THREE.CylinderGeometry(0.3, 0.3, poleHeight, 8);
+    const poleHeight = 16;
+    const poleGeom = new THREE.CylinderGeometry(0.35, 0.35, poleHeight, 8);
     const poleMat = new THREE.MeshStandardMaterial({
       color: '#94a3b8',
       metalness: 0.6,
@@ -647,7 +650,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     waypointsGroup.add(poleMesh);
     waypointDisposables.push(poleGeom, poleMat);
 
-    // C. 3D Billboard Placard with Place Name
+    // C. 3D Billboard Placard (Ingrandito per massima leggibilità da ogni angolazione)
     const placardTexture = createWaypointPlacardTexture(wpt.name, index + 1);
     const spriteMat = new THREE.SpriteMaterial({
       map: placardTexture,
@@ -655,8 +658,8 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
       depthTest: true,
     });
     const sprite = new THREE.Sprite(spriteMat);
-    sprite.position.set(pt.x, baseY + poleHeight + 4.5, pt.z);
-    sprite.scale.set(18, 4.5, 1);
+    sprite.position.set(pt.x, baseY + poleHeight + 5.5, pt.z);
+    sprite.scale.set(28, 7.0, 1);
     sprite.renderOrder = 30;
 
     waypointsGroup.add(sprite);
