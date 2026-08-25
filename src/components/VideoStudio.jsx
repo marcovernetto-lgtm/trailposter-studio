@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
   Video,
   Camera,
@@ -20,11 +21,8 @@ import {
   Plus,
   Trash2,
   Key,
-  Layers,
-  Sliders,
-  Maximize2,
 } from 'lucide-react';
-import { buildTerrainScene, MAP_STYLES } from '../lib/terrainEngine';
+import { buildTerrainScene } from '../lib/terrainEngine';
 import { createCameraController, CAMERA_MODES, resetCameraState } from '../lib/cameraSystem';
 import { exportVideo, downloadVideo, isVideoExportSupported } from '../lib/videoExporter';
 
@@ -33,6 +31,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
   const rendererRef = useRef(null);
   const sceneDataRef = useRef(null);
   const cameraCtrlRef = useRef(null);
+  const orbitControlsRef = useRef(null);
   const animIdRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -46,13 +45,13 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
   // Visual & Quality Settings
   const [heightExaggeration, setHeightExaggeration] = useState(1.6);
   const [trackColor, setTrackColor] = useState(config?.trackColor || '#14b8a6');
-  const [trackWidth, setTrackWidth] = useState(2.2);
+  const [trackWidth, setTrackWidth] = useState(0.8); // Slim elegant track by default
   const [duration, setDuration] = useState(30);
   const [aspectRatio, setAspectRatio] = useState('16:9');
 
   // Camera & Director Mode
   const [directorType, setDirectorType] = useState('auto'); // 'auto' | 'keyframe'
-  const [cameraMode, setCameraMode] = useState('drone'); // 'drone', 'eagle', 'cinematic', etc.
+  const [cameraMode, setCameraMode] = useState('drone');
   const [keyframes, setKeyframes] = useState([]);
   const [selectedKeyframeId, setSelectedKeyframeId] = useState(null);
 
@@ -60,7 +59,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
   const [previewProgress, setPreviewProgress] = useState(0);
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
   const previewStartTimeRef = useRef(null);
-  const isUserOrbitingRef = useRef(false);
+  const isOrbitInteractingRef = useRef(false);
 
   // Video Export State
   const [isExporting, setIsExporting] = useState(false);
@@ -77,7 +76,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
     setIsBuilding(true);
     setBuildProgress(0);
-    setBuildMessage('Inizializzazione satellite HD...');
+    setBuildMessage('Caricamento immagini satellitari HD...');
     setSceneReady(false);
     setSceneError(null);
 
@@ -90,6 +89,10 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       cancelAnimationFrame(animIdRef.current);
       animIdRef.current = null;
     }
+    if (orbitControlsRef.current) {
+      orbitControlsRef.current.dispose();
+      orbitControlsRef.current = null;
+    }
 
     try {
       const sceneData = await buildTerrainScene(
@@ -98,7 +101,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
           heightExaggeration,
           trackColor,
           trackWidth,
-          padding: 0.35,
+          padding: 0.32,
         },
         (pct, msg) => {
           setBuildProgress(pct);
@@ -128,9 +131,34 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.05;
         rendererRef.current = renderer;
         container.innerHTML = '';
         container.appendChild(renderer.domElement);
+      }
+
+      // Setup OrbitControls for Smooth Mouse Navigation
+      if (rendererRef.current && container) {
+        const controls = new OrbitControls(sceneData.camera, rendererRef.current.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.06;
+        controls.screenSpacePanning = true;
+        controls.minDistance = 15;
+        controls.maxDistance = 3500;
+        controls.maxPolarAngle = Math.PI / 2 - 0.05; // Don't go below ground horizon
+
+        controls.addEventListener('start', () => {
+          isOrbitInteractingRef.current = true;
+        });
+        controls.addEventListener('end', () => {
+          setTimeout(() => {
+            isOrbitInteractingRef.current = false;
+          }, 300);
+        });
+
+        orbitControlsRef.current = controls;
       }
 
       // Resize renderer to container dimensions
@@ -146,6 +174,12 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
       ctrl.updateCamera(sceneData.camera, 0, activeMode, keyframes);
 
+      if (orbitControlsRef.current) {
+        const startTarget = sceneData.trackCurve.getPointAt(0);
+        orbitControlsRef.current.target.copy(startTarget);
+        orbitControlsRef.current.update();
+      }
+
       setSceneReady(true);
       setPreviewProgress(0);
       setIsPreviewPlaying(false);
@@ -153,6 +187,9 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       // Start continuous animation loop
       const animate = () => {
         animIdRef.current = requestAnimationFrame(animate);
+        if (orbitControlsRef.current && isOrbitInteractingRef.current) {
+          orbitControlsRef.current.update();
+        }
         if (rendererRef.current && sceneDataRef.current) {
           rendererRef.current.render(sceneDataRef.current.scene, sceneDataRef.current.camera);
         }
@@ -173,6 +210,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     }
     return () => {
       if (animIdRef.current) cancelAnimationFrame(animIdRef.current);
+      if (orbitControlsRef.current) orbitControlsRef.current.dispose();
     };
   }, [points, heightExaggeration, trackColor, trackWidth]);
 
@@ -196,74 +234,6 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     return () => resizeObserver.disconnect();
   }, []);
 
-  // Interactive 3D Orbit, Pan & Zoom Controls for Manual Camera Framing
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    let isDragging = false;
-    let dragButton = 0; // 0 = left (orbit), 2 = right (pan)
-    let prevMouse = { x: 0, y: 0 };
-
-    const onMouseDown = (e) => {
-      if (e.target.tagName.toLowerCase() === 'button' || e.target.tagName.toLowerCase() === 'input') return;
-      isDragging = true;
-      dragButton = e.button;
-      isUserOrbitingRef.current = true;
-      prevMouse = { x: e.clientX, y: e.clientY };
-    };
-
-    const onMouseMove = (e) => {
-      if (!isDragging || !sceneDataRef.current) return;
-      const dx = e.clientX - prevMouse.x;
-      const dy = e.clientY - prevMouse.y;
-      prevMouse = { x: e.clientX, y: e.clientY };
-
-      const camera = sceneDataRef.current.camera;
-
-      if (dragButton === 0) {
-        // Left Drag: Orbit around track target
-        const rotSpeed = 0.005;
-        const currentPos = camera.position.clone();
-        camera.position.x = currentPos.x * Math.cos(dx * rotSpeed) - currentPos.z * Math.sin(dx * rotSpeed);
-        camera.position.z = currentPos.x * Math.sin(dx * rotSpeed) + currentPos.z * Math.cos(dx * rotSpeed);
-        camera.position.y = Math.max(10, currentPos.y + dy * 0.8);
-      } else {
-        // Right Drag / Pan: Lateral move
-        camera.position.x -= dx * 0.6;
-        camera.position.z -= dy * 0.6;
-      }
-    };
-
-    const onMouseUp = () => {
-      isDragging = false;
-    };
-
-    const onWheel = (e) => {
-      if (!sceneDataRef.current) return;
-      e.preventDefault();
-      const camera = sceneDataRef.current.camera;
-      const zoomFactor = e.deltaY * 0.3;
-      camera.position.y = Math.max(8, camera.position.y + zoomFactor);
-    };
-
-    const onContextMenu = (e) => e.preventDefault();
-
-    container.addEventListener('mousedown', onMouseDown);
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    container.addEventListener('wheel', onWheel, { passive: false });
-    container.addEventListener('contextmenu', onContextMenu);
-
-    return () => {
-      container.removeEventListener('mousedown', onMouseDown);
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-      container.removeEventListener('wheel', onWheel);
-      container.removeEventListener('contextmenu', onContextMenu);
-    };
-  }, []);
-
   // Preview Animation Playback Loop
   useEffect(() => {
     if (!isPreviewPlaying || !sceneDataRef.current || !cameraCtrlRef.current) return;
@@ -280,6 +250,11 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       setPreviewProgress(t);
       sceneDataRef.current.updateProgress(t);
       cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, t, activeMode, keyframes);
+
+      if (orbitControlsRef.current) {
+        const currentTarget = sceneDataRef.current.trackCurve.getPointAt(Math.min(0.999, t));
+        orbitControlsRef.current.target.lerp(currentTarget, 0.05);
+      }
 
       if (t >= 1.0) {
         setIsPreviewPlaying(false);
@@ -301,6 +276,12 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       sceneDataRef.current.updateProgress(val);
       const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
       cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, val, activeMode, keyframes);
+
+      if (orbitControlsRef.current) {
+        const currentTarget = sceneDataRef.current.trackCurve.getPointAt(Math.min(0.999, val));
+        orbitControlsRef.current.target.copy(currentTarget);
+        orbitControlsRef.current.update();
+      }
     }
   };
 
@@ -321,14 +302,16 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     if (!sceneDataRef.current) return;
 
     const camera = sceneDataRef.current.camera;
-    const currentTrackPt = sceneDataRef.current.trackCurve.getPointAt(Math.min(0.999, previewProgress));
+    const lookTarget = orbitControlsRef.current?.target
+      ? orbitControlsRef.current.target.clone()
+      : sceneDataRef.current.trackCurve.getPointAt(Math.min(0.999, previewProgress));
 
     const newKf = {
       id: `kf-${Date.now()}`,
       t: parseFloat(previewProgress.toFixed(3)),
-      name: `Scena a ${(previewProgress * duration).toFixed(0)}s`,
+      name: `Inquadratura a ${(previewProgress * duration).toFixed(0)}s`,
       position: camera.position.clone(),
-      lookAt: currentTrackPt.clone(),
+      lookAt: lookTarget,
     };
 
     const updated = [...keyframes.filter((k) => Math.abs(k.t - previewProgress) > 0.02), newKf].sort(
@@ -354,6 +337,10 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     if (sceneDataRef.current) {
       sceneDataRef.current.camera.position.copy(kf.position);
       sceneDataRef.current.camera.lookAt(kf.lookAt);
+      if (orbitControlsRef.current) {
+        orbitControlsRef.current.target.copy(kf.lookAt);
+        orbitControlsRef.current.update();
+      }
     }
   };
 
@@ -388,6 +375,10 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       sceneDataRef.current.updateProgress(0);
       const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
       cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, 0, activeMode, keyframes);
+      if (orbitControlsRef.current) {
+        orbitControlsRef.current.target.copy(sceneDataRef.current.trackCurve.getPointAt(0));
+        orbitControlsRef.current.update();
+      }
     }
   };
 
@@ -572,7 +563,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
               <div className="flex items-center justify-between">
                 <span className="text-[11px] text-neutral-300 font-semibold flex items-center gap-1.5">
                   <Key className="w-3.5 h-3.5 text-amber-400" />
-                  Keyframe sulla Timeline ({keyframes.length})
+                  Punti Regia Timeline ({keyframes.length})
                 </span>
                 <button
                   onClick={handleResetToAutoKeyframes}
@@ -629,7 +620,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
               </div>
 
               <p className="text-[9px] text-neutral-400 italic">
-                💡 Muovi la visuale con il mouse nella finestra 3D per inquadrare, sposta la timeline e premi "Salva Inquadratura".
+                💡 Trascina con il mouse per inquadrare le montagne a 360°, sposta la timeline e premi "Salva Inquadratura".
               </p>
             </div>
           )}
@@ -659,26 +650,26 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
               onChange={(e) => setHeightExaggeration(parseFloat(e.target.value))}
               className="w-full accent-teal-500 bg-neutral-800 rounded-lg h-1.5 cursor-pointer"
             />
-            <p className="text-[9px] text-neutral-500">
-              1.0× = Proporzioni naturali reali • 1.6×-2.5× = Rilievo montuoso cinematografico
-            </p>
           </div>
 
-          {/* Track Width */}
+          {/* Track Width (Slim & Subtle) */}
           <div className="space-y-1">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-neutral-400 font-medium">Spessore Traccia 3D</span>
+              <span className="text-neutral-400 font-medium">Spessore Linea GPX</span>
               <span className="font-mono text-teal-300 font-bold">{trackWidth.toFixed(1)} mm</span>
             </div>
             <input
               type="range"
-              min="1.0"
-              max="4.5"
-              step="0.2"
+              min="0.3"
+              max="2.5"
+              step="0.1"
               value={trackWidth}
               onChange={(e) => setTrackWidth(parseFloat(e.target.value))}
               className="w-full accent-teal-500 bg-neutral-800 rounded-lg h-1.5 cursor-pointer"
             />
+            <p className="text-[9px] text-neutral-500">
+              Linea sottile e definita per una visuale pulita delle montagne.
+            </p>
           </div>
 
           {/* Track Color */}
@@ -846,7 +837,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       </div>
 
       {/* Central 3D Interactive Viewport (Right - 8 Cols on LG) */}
-      <div className="lg:col-span-8 flex flex-col items-center justify-center glass-panel rounded-2xl min-h-[calc(100vh-100px)] border border-white/10 relative overflow-hidden bg-[#10141d]">
+      <div className="lg:col-span-8 flex flex-col items-center justify-center glass-panel rounded-2xl min-h-[calc(100vh-100px)] border border-white/10 relative overflow-hidden bg-[#0c1017]">
         {/* Top Floating Status Bar */}
         <div className="absolute top-4 left-4 right-4 z-10 flex items-center justify-between pointer-events-none">
           <div className="glass-panel-subtle px-3.5 py-1.5 rounded-full border border-white/10 pointer-events-auto flex items-center gap-2">
@@ -873,7 +864,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
         {/* Loading Overlay */}
         {isBuilding && (
-          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#10141d]/90 backdrop-blur-md">
+          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#0c1017]/90 backdrop-blur-md">
             <div className="flex flex-col items-center gap-4 max-w-sm text-center px-4">
               <div className="w-14 h-14 rounded-2xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400 shadow-xl">
                 <Loader2 className="w-7 h-7 animate-spin" />
@@ -935,7 +926,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
           </div>
         )}
 
-        {/* 3D WebGL Canvas Container */}
+        {/* 3D WebGL Canvas Container with Smooth Orbit Controls */}
         <div
           ref={containerRef}
           className="w-full h-[calc(100vh-140px)] min-h-[500px] cursor-grab active:cursor-grabbing flex items-center justify-center"
@@ -943,8 +934,8 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
         {/* Bottom Playback & Scrubber Controls */}
         {sceneReady && !isBuilding && (
-          <div className="absolute bottom-0 left-0 right-0 z-20 p-4 bg-gradient-to-t from-[#10141d]/95 via-[#10141d]/70 to-transparent backdrop-blur-sm">
-            <div className="flex flex-col gap-2 max-w-3xl mx-auto bg-black/70 p-3 rounded-2xl border border-white/10 shadow-2xl">
+          <div className="absolute bottom-0 left-0 right-0 z-20 p-4 bg-gradient-to-t from-[#0c1017]/95 via-[#0c1017]/70 to-transparent backdrop-blur-sm">
+            <div className="flex flex-col gap-2 max-w-3xl mx-auto bg-black/75 p-3 rounded-2xl border border-white/10 shadow-2xl">
               {/* Timeline with Keyframe Visual Markers */}
               <div className="relative w-full flex items-center">
                 <input
@@ -964,9 +955,9 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
                       <div
                         key={kf.id}
                         style={{ left: `${kf.t * 100}%` }}
-                        className={`absolute w-3 h-3 -ml-1.5 rounded-full border-2 transform transition-transform ${
+                        className={`absolute w-3.5 h-3.5 -ml-1.5 rounded-full border-2 transform transition-transform ${
                           selectedKeyframeId === kf.id
-                            ? 'bg-amber-400 border-white scale-125 z-20'
+                            ? 'bg-amber-400 border-white scale-125 z-20 shadow-md shadow-amber-500/50'
                             : 'bg-amber-500 border-black/80 scale-100 z-10'
                         }`}
                         title={`${kf.name} (${(kf.t * duration).toFixed(0)}s)`}
@@ -995,7 +986,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-neutral-400 hidden sm:inline">
-                    🖱️ Tasto Sinistro: Ruota 3D • Tasto Destro: Sposta • Rotella: Zoom
+                    🖱️ Sinistro: Ruota 360° • Destro: Sposta • Rotella: Zoom
                   </span>
                 </div>
               </div>
