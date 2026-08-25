@@ -239,7 +239,7 @@ function createConformalFlatRibbonGeometry(
 export async function buildTerrainScene(trackPoints, options = {}, onProgress = () => {}) {
   const config = {
     heightExaggeration: 1.6,
-    trackColor: '#14b8a6',
+    trackColor: '#facc15',
     trackWidth: 1.4, // Wide flat ribbon width
     padding: 0.20, // 20% framing padding
     quality: 'ultra', // 'ultra' | 'high' | 'standard'
