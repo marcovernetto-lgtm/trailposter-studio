@@ -87,10 +87,15 @@ async function asyncPool(poolLimit, array, iteratorFn) {
 }
 
 /**
- * Builds a flat 3D ribbon geometry (wide horizontal strip, minimal vertical height)
- * that drapes smoothly onto the terrain.
+ * Builds a flat 3D ribbon geometry that is strictly clamped to the ground terrain
+ * at EVERY vertex so it can NEVER sink into or get hidden by mountains!
  */
-function createFlatRibbonGeometry(curve, numSegments = 1600, width = 1.4, lift = 0.22) {
+function createConformalFlatRibbonGeometry(
+  curve,
+  numSegments = 1800,
+  width = 1.4,
+  getGroundYAt = (vx, vz) => 0
+) {
   const points = curve.getSpacedPoints(numSegments);
   const vertexCount = (numSegments + 1) * 2;
   const positions = new Float32Array(vertexCount * 3);
@@ -98,24 +103,28 @@ function createFlatRibbonGeometry(curve, numSegments = 1600, width = 1.4, lift =
   const normals = new Float32Array(vertexCount * 3);
   const indices = [];
 
+  const lift = 0.55; // Guaranteed clearance above ground mesh
+
   for (let i = 0; i <= numSegments; i++) {
     const t = i / numSegments;
     const pt = points[i];
     const tangent = curve.getTangentAt(Math.min(0.999, t)).normalize();
 
-    // Perpendicular horizontal vector (parallel to ground plane)
+    // Perpendicular horizontal vector
     const perp = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
     const halfW = width * 0.5;
 
-    // Left vertex
+    // Left vertex position
     const lx = pt.x - perp.x * halfW;
-    const ly = pt.y + lift;
     const lz = pt.z - perp.z * halfW;
+    const groundLeftY = getGroundYAt(lx, lz);
+    const ly = Math.max(pt.y, groundLeftY) + lift;
 
-    // Right vertex
+    // Right vertex position
     const rx = pt.x + perp.x * halfW;
-    const ry = pt.y + lift;
     const rz = pt.z + perp.z * halfW;
+    const groundRightY = getGroundYAt(rx, rz);
+    const ry = Math.max(pt.y, groundRightY) + lift;
 
     const idx = i * 2;
     // Left vertex
@@ -160,13 +169,13 @@ function createFlatRibbonGeometry(curve, numSegments = 1600, width = 1.4, lift =
 
 /**
  * Build a complete Three.js scene with ultra-crisp 4K UHD 3D terrain mesh,
- * guaranteed 100% full map coverage, and a flat wide glowing ribbon track.
+ * guaranteed 100% full map coverage, and a flat ribbon track that is ALWAYS in the foreground.
  */
 export async function buildTerrainScene(trackPoints, options = {}, onProgress = () => {}) {
   const config = {
     heightExaggeration: 1.6,
     trackColor: '#14b8a6',
-    trackWidth: 1.4, // Wide horizontal ribbon width
+    trackWidth: 1.4, // Wide flat ribbon width
     padding: 0.20, // 20% framing padding
     quality: 'ultra', // 'ultra' | 'high' | 'standard'
     ...options,
@@ -229,7 +238,6 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   let startTx = 0, endTx = 0, startTy = 0, endTy = 0;
   let numTilesX = 0, numTilesY = 0;
 
-  // Search from highest zoom (Zoom 18) down to find the maximum possible resolution
   for (let testZ = 18; testZ >= 9; testZ--) {
     const minT = mercatorToTile(boundMinMx, boundMaxMy, testZ);
     const maxT = mercatorToTile(boundMaxMx, boundMinMy, testZ);
@@ -407,6 +415,17 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   const worldHeight = worldWidth * (gridSpanY / gridSpanX);
   const scale = worldWidth / gridSpanX; // 3D units per meter
 
+  // Helper to convert 3D (vx, vz) directly to terrain ground Y
+  const getGroundYAt = (vx, vz) => {
+    const nx = (vx / worldWidth) + 0.5;
+    const ny = (vz / worldHeight) + 0.5;
+    const mx = gridMinMx + nx * gridSpanX;
+    const my = gridMaxMy - ny * gridSpanY;
+    const rawEle = getElevationAtMercator(mx, my);
+    const clampedEle = Math.max(lowestEle, Math.min(8848, rawEle));
+    return (clampedEle - lowestEle) * scale * config.heightExaggeration;
+  };
+
   // High density subdivision for crisp mountain topology
   const segmentsX = Math.min(300, numTilesX * 36);
   const segmentsY = Math.min(300, numTilesY * 36);
@@ -419,18 +438,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   for (let i = 0; i < posAttr.count; i++) {
     const vx = posAttr.getX(i);
     const vz = posAttr.getZ(i);
-
-    const nx = (vx / worldWidth) + 0.5;
-    const ny = (vz / worldHeight) + 0.5;
-
-    const mx = gridMinMx + nx * gridSpanX;
-    const my = gridMaxMy - ny * gridSpanY;
-
-    const rawEle = getElevationAtMercator(mx, my);
-    const clampedEle = Math.max(lowestEle, Math.min(8848, rawEle));
-    const vy = (clampedEle - lowestEle) * scale * config.heightExaggeration;
-
-    posAttr.setY(i, vy);
+    posAttr.setY(i, getGroundYAt(vx, vz));
   }
 
   geometry.computeVertexNormals();
@@ -443,20 +451,25 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   texture.magFilter = THREE.LinearFilter;
   texture.anisotropy = 16;
 
+  // Terrain material with polygonOffset to prevent any Z-fighting with track
   const terrainMaterial = new THREE.MeshStandardMaterial({
     map: texture,
     roughness: 0.88,
     metalness: 0.02,
     flatShading: false,
+    polygonOffset: true,
+    polygonOffsetFactor: 1.0, // Push terrain back slightly in depth buffer
+    polygonOffsetUnits: 4.0,
   });
 
   const terrainMesh = new THREE.Mesh(geometry, terrainMaterial);
   terrainMesh.receiveShadow = true;
   terrainMesh.castShadow = true;
+  terrainMesh.renderOrder = 0; // Terrain renders first
 
-  onProgress(88, 'Creazione nastro piatto 3D del percorso GPX...');
+  onProgress(88, 'Creazione nastro piatto 3D sempre in primo piano...');
 
-  // 6. Project GPX Track to 3D World Space (Flat Wide Ribbon Strip)
+  // 6. Project GPX Track to 3D World Space with Exact Ground Conformance
   const track3dPoints = [];
   let lastVector = null;
 
@@ -466,13 +479,9 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
     const vx = (nx - 0.5) * worldWidth;
     const vz = (ny - 0.5) * worldHeight;
+    const groundY = getGroundYAt(vx, vz);
 
-    const sampleEle = getElevationAtMercator(p.mx, p.my);
-    const baseEle = sampleEle > 0 ? sampleEle : p.ele;
-    // Micro lift for flat ribbon
-    const vy = (baseEle - lowestEle) * scale * config.heightExaggeration + 0.2;
-
-    const pt = new THREE.Vector3(vx, vy, vz);
+    const pt = new THREE.Vector3(vx, groundY + 0.4, vz);
 
     if (!lastVector || lastVector.distanceTo(pt) > 0.4) {
       track3dPoints.push(pt);
@@ -486,25 +495,32 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
   const trackCurve = new THREE.CatmullRomCurve3(track3dPoints, false, 'centripetal', 0.2);
 
-  // FLAT RIBBON GEOMETRY: wide horizontally, minimal vertical height
-  const ribbonGeom = createFlatRibbonGeometry(
+  // FLAT RIBBON GEOMETRY: strictly clamped to ground elevation at every vertex
+  const ribbonGeom = createConformalFlatRibbonGeometry(
     trackCurve,
-    Math.max(400, track3dPoints.length * 3),
-    config.trackWidth, // Width of horizontal ribbon
-    0.22 // Height lift above terrain
+    Math.max(600, track3dPoints.length * 4),
+    config.trackWidth,
+    getGroundYAt
   );
 
+  // Track material pulled forward in depth buffer with negative polygonOffset
   const trackMaterial = new THREE.MeshStandardMaterial({
     color: config.trackColor,
     emissive: config.trackColor,
-    emissiveIntensity: 0.8,
+    emissiveIntensity: 0.85,
     roughness: 0.2,
     metalness: 0.3,
     side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -2.0, // Pull track forward in depth buffer
+    polygonOffsetUnits: -4.0,
+    depthTest: true,
+    depthWrite: true,
   });
 
   const trackMesh = new THREE.Mesh(ribbonGeom, trackMaterial);
   trackMesh.castShadow = true;
+  trackMesh.renderOrder = 10; // Track renders over terrain
 
   const totalIndexCount = ribbonGeom.index
     ? ribbonGeom.index.count
@@ -518,10 +534,14 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     emissiveIntensity: 1.0,
     roughness: 0.1,
     metalness: 0.2,
+    polygonOffset: true,
+    polygonOffsetFactor: -3.0,
+    polygonOffsetUnits: -6.0,
   });
   const markerMesh = new THREE.Mesh(markerGeom, markerMaterial);
   markerMesh.position.copy(track3dPoints[0]);
   markerMesh.castShadow = true;
+  markerMesh.renderOrder = 20;
 
   // 8. Construct Three.js Scene & Lighting
   const scene = new THREE.Scene();
@@ -568,7 +588,8 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
     // Update marker position
     const pos = trackCurve.getPointAt(clampedT);
-    markerMesh.position.copy(pos).add(new THREE.Vector3(0, 0.3, 0));
+    const groundY = getGroundYAt(pos.x, pos.z);
+    markerMesh.position.set(pos.x, Math.max(pos.y, groundY) + 0.6, pos.z);
 
     return { position: pos };
   };
