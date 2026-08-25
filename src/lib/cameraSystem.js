@@ -52,16 +52,16 @@ export const CAMERA_MODES = {
  * Pre-computes a heavily smoothed guide curve for camera tracking.
  * This filters out sudden micro-turns and mountain hairpin jitter.
  */
-function createSmoothedGuideCurve(trackCurve, samples = 120) {
+function createSmoothedGuideCurve(trackCurve, samples = 150) {
   const rawPoints = [];
   for (let i = 0; i <= samples; i++) {
     const t = i / samples;
     rawPoints.push(trackCurve.getPointAt(Math.min(0.999, t)));
   }
 
-  // Apply Gaussian/Moving average filter (window size = 7)
+  // Apply Gaussian/Moving average filter (window size = 9)
   const smoothedPoints = [];
-  const halfWin = 3;
+  const halfWin = 4;
 
   for (let i = 0; i <= samples; i++) {
     let sum = new THREE.Vector3();
@@ -70,7 +70,7 @@ function createSmoothedGuideCurve(trackCurve, samples = 120) {
     for (let w = -halfWin; w <= halfWin; w++) {
       const idx = Math.max(0, Math.min(samples, i + w));
       const dist = Math.abs(w);
-      const weight = Math.exp(-(dist * dist) / (2 * 1.5 * 1.5));
+      const weight = Math.exp(-(dist * dist) / (2 * 2.0 * 2.0));
       sum.addScaledVector(rawPoints[idx], weight);
       weightSum += weight;
     }
@@ -85,7 +85,7 @@ function createSmoothedGuideCurve(trackCurve, samples = 120) {
  * Create a camera controller for the given track curve and optional keyframe set.
  */
 export function createCameraController(trackCurve, worldBounds, keyframes = []) {
-  const guideCurve = createSmoothedGuideCurve(trackCurve, 150);
+  const guideCurve = createSmoothedGuideCurve(trackCurve, 180);
 
   const state = {
     currentPosition: new THREE.Vector3(),
@@ -97,7 +97,7 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
   const getGuidePoint = (t) => guideCurve.getPointAt(Math.max(0, Math.min(t, 0.999)));
   const getGuideTangent = (t) => guideCurve.getTangentAt(Math.max(0, Math.min(t, 0.999))).normalize();
 
-  // Track centroid for orbit and overview shots
+  // Track centroid for orbit, overview and outro shots
   const startPt = getTrackPoint(0);
   const midPt = getTrackPoint(0.5);
   const endPt = getTrackPoint(0.999);
@@ -158,14 +158,21 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
   };
 
   /**
-   * Main camera update function called per frame
+   * Main camera update function called per frame.
+   * Supports optional outroProgress (0 to 1) for the final 4-second zoom-out reveal!
    */
-  const updateCamera = (camera, progress, mode = 'drone', customKeyframes = []) => {
+  const updateCamera = (
+    camera,
+    progress,
+    mode = 'drone',
+    customKeyframes = [],
+    outroProgress = 0.0
+  ) => {
     const t = Math.max(0, Math.min(progress, 1.0));
 
     let desiredPosition = new THREE.Vector3();
     let desiredLookAt = new THREE.Vector3();
-    let lerpFactor = 0.04; // Slower, ultra-smooth cinematic lerp
+    let lerpFactor = 0.04;
 
     const currentTrackPt = getTrackPoint(t);
     const guidePt = getGuidePoint(t);
@@ -176,19 +183,15 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
       const followDist = 140;
       const heightOffset = 65;
 
-      // Lookahead point 6% forward along the curve for natural panning
       const lookAheadT = Math.min(t + 0.06, 0.999);
       const lookAheadPt = getTrackPoint(lookAheadT);
 
-      // Smooth camera position behind the smoothed guide point
       desiredPosition
         .copy(guidePt)
         .sub(guideTangent.clone().multiplyScalar(followDist))
         .add(new THREE.Vector3(0, heightOffset, 0));
 
-      // Ensure camera is elevated above ground
       desiredPosition.y = Math.max(currentTrackPt.y + 40, desiredPosition.y);
-
       desiredLookAt.copy(lookAheadPt).add(new THREE.Vector3(0, 8, 0));
       lerpFactor = 0.035;
     }
@@ -197,8 +200,6 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
     else if (mode === 'eagle') {
       const eagleHeight = 220;
       const swayOffset = Math.sin(t * Math.PI * 2) * 90;
-
-      // Perpendicular lateral drift
       const perp = new THREE.Vector3(-guideTangent.z, 0, guideTangent.x).normalize();
 
       desiredPosition
@@ -240,18 +241,15 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
     // 5. REGIA MULTI-ANGOLO (Cinematic sequence with soft blended cuts)
     else if (mode === 'cinematic') {
       if (t < 0.25) {
-        // Scene 1: High establishing lateral shot
         desiredPosition.copy(guidePt).add(new THREE.Vector3(120, 160, 80));
         desiredLookAt.copy(currentTrackPt);
       } else if (t < 0.5) {
-        // Scene 2: Low-altitude chase
         desiredPosition
           .copy(guidePt)
           .sub(guideTangent.clone().multiplyScalar(80))
           .add(new THREE.Vector3(0, 35, 0));
         desiredLookAt.copy(getTrackPoint(Math.min(t + 0.05, 0.999)));
       } else if (t < 0.75) {
-        // Scene 3: Wide diagonal flyby
         const angle = t * Math.PI * 2;
         desiredPosition.set(
           guidePt.x + 160 * Math.cos(angle),
@@ -260,7 +258,6 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
         );
         desiredLookAt.copy(currentTrackPt);
       } else {
-        // Scene 4: Majestic pull-back rise
         const pullProgress = (t - 0.75) / 0.25;
         desiredPosition
           .copy(guidePt)
@@ -271,24 +268,21 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
       lerpFactor = 0.025;
     }
 
-    // 6. INTRO & OUTRO TOTALE (Epic establishing zoom in & zoom out)
+    // 6. INTRO & OUTRO TOTALE
     else if (mode === 'overview') {
       if (t < 0.15) {
-        // Intro: Descending zoom
         const introT = t / 0.15;
         const highOverview = new THREE.Vector3(centroid.x, centroid.y + 550, centroid.z + 200);
         const lowChase = guidePt.clone().sub(guideTangent.clone().multiplyScalar(130)).add(new THREE.Vector3(0, 65, 0));
         desiredPosition.lerpVectors(highOverview, lowChase, introT * introT);
         desiredLookAt.lerpVectors(centroid, currentTrackPt, introT);
       } else if (t < 0.85) {
-        // Middle: Smooth drone
         desiredPosition
           .copy(guidePt)
           .sub(guideTangent.clone().multiplyScalar(130))
           .add(new THREE.Vector3(0, 65, 0));
         desiredLookAt.copy(getTrackPoint(Math.min(t + 0.05, 0.999)));
       } else {
-        // Outro: Ascent to full panorama
         const outroT = (t - 0.85) / 0.15;
         const lowChase = guidePt.clone().sub(guideTangent.clone().multiplyScalar(130)).add(new THREE.Vector3(0, 65, 0));
         const highOverview = new THREE.Vector3(centroid.x, centroid.y + 600, centroid.z + 250);
@@ -306,8 +300,34 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
       lerpFactor = 0.05;
     }
 
+    // 8. FINAL 4-SECOND CINEMATIC OUTRO ZOOM OUT (Reveals the entire completed trail)
+    if (outroProgress > 0) {
+      const p = Math.max(0, Math.min(outroProgress, 1.0));
+      // Smooth cubic Hermite easeInOut curve
+      const smoothP = p * p * (3 - 2 * p);
+
+      // Save finish position before outro
+      const finishPos = desiredPosition.clone();
+      const finishLook = desiredLookAt.clone();
+
+      // Epic high-altitude overview position overlooking the entire massif
+      const outroAngle = Math.PI / 4 + p * 0.15; // Gentle majestic drift
+      const outroHeight = 650;
+      const outroDist = 450;
+
+      const grandOverviewPos = new THREE.Vector3(
+        centroid.x + outroDist * Math.cos(outroAngle),
+        centroid.y + outroHeight,
+        centroid.z + outroDist * Math.sin(outroAngle)
+      );
+
+      desiredPosition.lerpVectors(finishPos, grandOverviewPos, smoothP);
+      desiredLookAt.lerpVectors(finishLook, centroid, smoothP);
+      lerpFactor = 0.06;
+    }
+
     // Apply smooth exponential damping to eliminate all jitter
-    if (!state.initialized || t === 0) {
+    if (!state.initialized || (t === 0 && outroProgress === 0)) {
       state.currentPosition.copy(desiredPosition);
       state.currentLookAt.copy(desiredLookAt);
       state.initialized = true;

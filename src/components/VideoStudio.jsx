@@ -22,13 +22,14 @@ import {
   Trash2,
   Key,
   Activity,
-  Gauge,
   TrendingUp,
-  MapPin,
+  Award,
 } from 'lucide-react';
 import { buildTerrainScene } from '../lib/terrainEngine';
 import { createCameraController, CAMERA_MODES, resetCameraState } from '../lib/cameraSystem';
 import { exportVideo, downloadVideo, isVideoExportSupported } from '../lib/videoExporter';
+
+const OUTRO_SEC = 4.0; // 4 seconds final epic zoom-out reveal
 
 export function VideoStudio({ trackData, config, onGpxUpload }) {
   const containerRef = useRef(null);
@@ -51,8 +52,11 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
   const [heightExaggeration, setHeightExaggeration] = useState(1.6);
   const [trackColor, setTrackColor] = useState(config?.trackColor || '#14b8a6');
   const [trackWidth, setTrackWidth] = useState(1.4); // Wide flat ribbon width
-  const [duration, setDuration] = useState(30);
+  const [duration, setDuration] = useState(30); // Flyover duration in seconds
   const [aspectRatio, setAspectRatio] = useState('16:9');
+
+  // Total video duration including 4-second grand outro reveal
+  const totalDuration = duration + OUTRO_SEC;
 
   // HUD & Liquid Glass Telemetry Settings
   const [showHud, setShowHud] = useState(true);
@@ -80,13 +84,26 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
   const points = trackData?.points || [];
   const stats = trackData?.stats || { totalDistanceKm: 0, elevationGainM: 0, minElevationM: 0, maxElevationM: 0 };
 
-  // Calculate live dynamic telemetry based on current progress
+  // Calculate trail progress vs outro progress
+  const timeProgress = useMemo(() => {
+    const elapsedSec = previewProgress * totalDuration;
+    if (elapsedSec <= duration) {
+      const tp = duration > 0 ? elapsedSec / duration : 1.0;
+      return { trailProgress: Math.min(1.0, tp), outroProgress: 0.0, isOutro: false };
+    } else {
+      const op = (elapsedSec - duration) / OUTRO_SEC;
+      return { trailProgress: 1.0, outroProgress: Math.min(1.0, op), isOutro: true };
+    }
+  }, [previewProgress, duration, totalDuration]);
+
+  // Calculate live dynamic telemetry based on current trail progress
   const currentTelemetry = useMemo(() => {
     if (!points || points.length < 2) {
-      return { distKm: 0, eleM: 0, gainM: 0 };
+      return { distKm: '0.0', eleM: 0, gainM: 0 };
     }
 
-    const currentDist = previewProgress * stats.totalDistanceKm;
+    const { trailProgress, isOutro } = timeProgress;
+    const currentDist = trailProgress * stats.totalDistanceKm;
     let currentPt = points[0];
     let progressiveGain = 0;
 
@@ -108,9 +125,10 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     return {
       distKm: currentDist.toFixed(1),
       eleM: Math.round(currentPt.ele || 0),
-      gainM: Math.round(progressiveGain * (previewProgress < 0.99 ? previewProgress : 1)),
+      gainM: Math.round(isOutro ? stats.elevationGainM : progressiveGain * (trailProgress < 0.99 ? trailProgress : 1)),
+      isOutro,
     };
-  }, [points, stats, previewProgress]);
+  }, [points, stats, timeProgress]);
 
   // Build 3D Terrain & Track Scene
   const buildScene = useCallback(async () => {
@@ -215,7 +233,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
       // Position camera at start
       const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
-      ctrl.updateCamera(sceneData.camera, 0, activeMode, keyframes);
+      ctrl.updateCamera(sceneData.camera, 0, activeMode, keyframes, 0);
 
       if (orbitControlsRef.current) {
         const startTarget = sceneData.trackCurve.getPointAt(0);
@@ -277,29 +295,39 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     return () => resizeObserver.disconnect();
   }, []);
 
-  // Preview Animation Playback Loop
+  // Preview Animation Playback Loop (Handles 4s Grand Outro Zoom-out)
   useEffect(() => {
     if (!isPreviewPlaying || !sceneDataRef.current || !cameraCtrlRef.current) return;
 
     let localAnimId;
-    previewStartTimeRef.current = Date.now() - previewProgress * duration * 1000;
+    previewStartTimeRef.current = Date.now() - previewProgress * totalDuration * 1000;
 
     const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
 
     const loop = () => {
       const elapsed = (Date.now() - previewStartTimeRef.current) / 1000;
-      const t = Math.min(elapsed / duration, 1.0);
+      const overallProgress = Math.min(elapsed / totalDuration, 1.0);
 
-      setPreviewProgress(t);
-      sceneDataRef.current.updateProgress(t);
-      cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, t, activeMode, keyframes);
+      let tp = 1.0;
+      let op = 0.0;
+      if (elapsed <= duration) {
+        tp = Math.min(1.0, elapsed / duration);
+        op = 0.0;
+      } else {
+        tp = 1.0;
+        op = Math.min(1.0, (elapsed - duration) / OUTRO_SEC);
+      }
 
-      if (orbitControlsRef.current) {
-        const currentTarget = sceneDataRef.current.trackCurve.getPointAt(Math.min(0.999, t));
+      setPreviewProgress(overallProgress);
+      sceneDataRef.current.updateProgress(tp);
+      cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, tp, activeMode, keyframes, op);
+
+      if (orbitControlsRef.current && op === 0) {
+        const currentTarget = sceneDataRef.current.trackCurve.getPointAt(Math.min(0.999, tp));
         orbitControlsRef.current.target.lerp(currentTarget, 0.05);
       }
 
-      if (t >= 1.0) {
+      if (overallProgress >= 1.0) {
         setIsPreviewPlaying(false);
         return;
       }
@@ -309,19 +337,31 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
     localAnimId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(localAnimId);
-  }, [isPreviewPlaying, cameraMode, directorType, keyframes, duration]);
+  }, [isPreviewPlaying, cameraMode, directorType, keyframes, duration, totalDuration]);
 
   // Scrubbing Timeline Slider
   const handleScrub = (val) => {
     setIsPreviewPlaying(false);
     setPreviewProgress(val);
-    if (sceneDataRef.current && cameraCtrlRef.current) {
-      sceneDataRef.current.updateProgress(val);
-      const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
-      cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, val, activeMode, keyframes);
 
-      if (orbitControlsRef.current) {
-        const currentTarget = sceneDataRef.current.trackCurve.getPointAt(Math.min(0.999, val));
+    const elapsed = val * totalDuration;
+    let tp = 1.0;
+    let op = 0.0;
+    if (elapsed <= duration) {
+      tp = Math.min(1.0, elapsed / duration);
+      op = 0.0;
+    } else {
+      tp = 1.0;
+      op = Math.min(1.0, (elapsed - duration) / OUTRO_SEC);
+    }
+
+    if (sceneDataRef.current && cameraCtrlRef.current) {
+      sceneDataRef.current.updateProgress(tp);
+      const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
+      cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, tp, activeMode, keyframes, op);
+
+      if (orbitControlsRef.current && op === 0) {
+        const currentTarget = sceneDataRef.current.trackCurve.getPointAt(Math.min(0.999, tp));
         orbitControlsRef.current.target.copy(currentTarget);
         orbitControlsRef.current.update();
       }
@@ -335,7 +375,13 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     if (cameraCtrlRef.current) {
       resetCameraState(cameraCtrlRef.current);
       if (sceneDataRef.current) {
-        cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, previewProgress, mode, keyframes);
+        cameraCtrlRef.current.updateCamera(
+          sceneDataRef.current.camera,
+          timeProgress.trailProgress,
+          mode,
+          keyframes,
+          timeProgress.outroProgress
+        );
       }
     }
   };
@@ -347,19 +393,20 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     const camera = sceneDataRef.current.camera;
     const lookTarget = orbitControlsRef.current?.target
       ? orbitControlsRef.current.target.clone()
-      : sceneDataRef.current.trackCurve.getPointAt(Math.min(0.999, previewProgress));
+      : sceneDataRef.current.trackCurve.getPointAt(Math.min(0.999, timeProgress.trailProgress));
 
     const newKf = {
       id: `kf-${Date.now()}`,
-      t: parseFloat(previewProgress.toFixed(3)),
-      name: `Inquadratura a ${(previewProgress * duration).toFixed(0)}s`,
+      t: parseFloat(timeProgress.trailProgress.toFixed(3)),
+      name: `Inquadratura a ${(previewProgress * totalDuration).toFixed(0)}s`,
       position: camera.position.clone(),
       lookAt: lookTarget,
     };
 
-    const updated = [...keyframes.filter((k) => Math.abs(k.t - previewProgress) > 0.02), newKf].sort(
-      (a, b) => a.t - b.t
-    );
+    const updated = [
+      ...keyframes.filter((k) => Math.abs(k.t - timeProgress.trailProgress) > 0.02),
+      newKf,
+    ].sort((a, b) => a.t - b.t);
 
     setKeyframes(updated);
     setDirectorType('keyframe');
@@ -375,7 +422,8 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
   // Go to Keyframe Position
   const handleJumpToKeyframe = (kf) => {
-    handleScrub(kf.t);
+    const overallT = (kf.t * duration) / totalDuration;
+    handleScrub(overallT);
     setSelectedKeyframeId(kf.id);
     if (sceneDataRef.current) {
       sceneDataRef.current.camera.position.copy(kf.position);
@@ -417,7 +465,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     if (sceneDataRef.current && cameraCtrlRef.current) {
       sceneDataRef.current.updateProgress(0);
       const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
-      cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, 0, activeMode, keyframes);
+      cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, 0, activeMode, keyframes, 0);
       if (orbitControlsRef.current) {
         orbitControlsRef.current.target.copy(sceneDataRef.current.trackCurve.getPointAt(0));
         orbitControlsRef.current.update();
@@ -430,10 +478,10 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     (ctx, width, height, progress) => {
       if (!showHud || !points || points.length < 2) return;
 
-      const scale = width / 1920; // Scale relative to 1080p
-      const cardW = 340 * scale;
-      const cardH = 135 * scale;
-      const margin = 32 * scale;
+      const scale = width / 1920;
+      const cardW = 350 * scale;
+      const cardH = 138 * scale;
+      const margin = 36 * scale;
 
       let cardX = margin;
       let cardY = height - cardH - margin;
@@ -447,13 +495,16 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
         cardY = margin + 20 * scale;
       }
 
+      const elapsed = progress * totalDuration;
+      const tp = elapsed <= duration ? elapsed / duration : 1.0;
+      const isOutro = elapsed > duration;
+
       // 1. Draw Frosted Glass Card Background
       ctx.save();
-      ctx.fillStyle = 'rgba(12, 16, 23, 0.72)';
+      ctx.fillStyle = 'rgba(10, 14, 20, 0.72)';
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
       ctx.lineWidth = 1.5 * scale;
 
-      // Rounded rectangle
       const r = 16 * scale;
       ctx.beginPath();
       ctx.moveTo(cardX + r, cardY);
@@ -470,16 +521,16 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       ctx.stroke();
 
       // Top Glass Highlight
-      const grad = ctx.createLinearGradient(cardX, cardY, cardX, cardY + 24 * scale);
-      grad.addColorStop(0, 'rgba(255, 255, 255, 0.14)');
+      const grad = ctx.createLinearGradient(cardX, cardY, cardX, cardY + 26 * scale);
+      grad.addColorStop(0, 'rgba(255, 255, 255, 0.16)');
       grad.addColorStop(1, 'rgba(255, 255, 255, 0.0)');
       ctx.fillStyle = grad;
       ctx.fill();
 
       // 2. Draw Distance & Elevation Gain Stats
-      const curDist = (progress * stats.totalDistanceKm).toFixed(1);
+      const curDist = (tp * stats.totalDistanceKm).toFixed(1);
       let curEle = points[0].ele || 0;
-      const targetDist = progress * stats.totalDistanceKm;
+      const targetDist = tp * stats.totalDistanceKm;
 
       for (let i = 0; i < points.length; i++) {
         if (points[i].cumDistance >= targetDist) {
@@ -498,15 +549,21 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       ctx.fillText(`/ ${stats.totalDistanceKm} km`, cardX + 85 * scale, cardY + 26 * scale);
 
       // Altitude & D+
-      ctx.fillStyle = '#14b8a6';
-      ctx.font = `bold ${15 * scale}px "JetBrains Mono", monospace`;
-      ctx.fillText(`${Math.round(curEle)} m`, cardX + cardW - 85 * scale, cardY + 26 * scale);
+      if (isOutro) {
+        ctx.fillStyle = '#f59e0b';
+        ctx.font = `bold ${12 * scale}px sans-serif`;
+        ctx.fillText(`🏆 TRAGUARDO FINALE`, cardX + cardW - 150 * scale, cardY + 26 * scale);
+      } else {
+        ctx.fillStyle = '#14b8a6';
+        ctx.font = `bold ${15 * scale}px "JetBrains Mono", monospace`;
+        ctx.fillText(`${Math.round(curEle)} m`, cardX + cardW - 85 * scale, cardY + 26 * scale);
+      }
 
       ctx.fillStyle = '#f59e0b';
       ctx.font = `${11 * scale}px sans-serif`;
-      ctx.fillText(`+${Math.round(stats.elevationGainM * progress)}m D+`, cardX + 16 * scale, cardY + 44 * scale);
+      ctx.fillText(`+${Math.round(stats.elevationGainM * tp)}m D+`, cardX + 16 * scale, cardY + 44 * scale);
 
-      // 3. Draw Mini Elevation Profile SVG Curve
+      // 3. Draw Mini Elevation Profile Curve
       const chartX = cardX + 16 * scale;
       const chartY = cardY + 54 * scale;
       const chartW = cardW - 32 * scale;
@@ -548,7 +605,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       ctx.stroke();
 
       // Glowing Current Position Marker Dot on Chart
-      const markerDotX = chartX + progress * chartW;
+      const markerDotX = chartX + tp * chartW;
       const markerDotY = chartY + chartH - ((curEle - minE) / spanE) * chartH;
 
       ctx.beginPath();
@@ -561,10 +618,10 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
       ctx.restore();
     },
-    [showHud, points, stats, hudPosition]
+    [showHud, points, stats, hudPosition, duration, totalDuration]
   );
 
-  // Video Export Handler (WebCodecs MP4 1080p with Liquid Glass HUD)
+  // Video Export Handler (WebCodecs MP4 1080p with 4s Outro Zoom-out)
   const handleExport = async () => {
     if (!sceneDataRef.current || !rendererRef.current) return;
 
@@ -577,7 +634,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
     setIsExporting(true);
     setExportProgress(0);
-    setExportMessage('Inizializzazione rendering 1080p...');
+    setExportMessage('Inizializzazione rendering 1080p con outro 4s...');
     setExportError(null);
     setExportedUrl(null);
     setIsPreviewPlaying(false);
@@ -592,16 +649,27 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
         renderer: rendererRef.current,
         scene: sceneDataRef.current.scene,
         camera: sceneDataRef.current.camera,
-        updateFrame: (progress) => {
-          sceneDataRef.current.updateProgress(progress);
-          cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, progress, activeMode, keyframes);
+        updateFrame: (overallProgress) => {
+          const elapsed = overallProgress * totalDuration;
+          let tp = 1.0;
+          let op = 0.0;
+          if (elapsed <= duration) {
+            tp = Math.min(1.0, elapsed / duration);
+            op = 0.0;
+          } else {
+            tp = 1.0;
+            op = Math.min(1.0, (elapsed - duration) / OUTRO_SEC);
+          }
+
+          sceneDataRef.current.updateProgress(tp);
+          cameraCtrlRef.current.updateCamera(sceneDataRef.current.camera, tp, activeMode, keyframes, op);
         },
         drawOverlay: showHud ? (ctx, vw, vh, p) => drawHudOnVideo(ctx, vw, vh, p) : null,
         options: {
           width: w,
           height: h,
           fps: 30,
-          durationSec: duration,
+          durationSec: totalDuration,
           bitrate: 8_000_000,
         },
         onProgress: (pct, msg) => {
@@ -871,7 +939,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
                 className="w-full flex items-center justify-center gap-2 p-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white text-xs font-bold shadow-lg transition-all active:scale-98"
               >
                 <Plus className="w-4 h-4" />
-                <span>Salva Inquadratura Corrente a {(previewProgress * duration).toFixed(0)}s</span>
+                <span>Salva Inquadratura Corrente a {(previewProgress * totalDuration).toFixed(0)}s</span>
               </button>
 
               {/* Keyframe List */}
@@ -893,7 +961,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
                       <div>
                         <p className="font-semibold text-white text-[11px]">{kf.name}</p>
                         <p className="text-[9px] text-neutral-400 font-mono">
-                          Tempo: {(kf.t * duration).toFixed(1)}s ({(kf.t * 100).toFixed(0)}%)
+                          Percorso: {(kf.t * 100).toFixed(0)}% ({(kf.t * duration).toFixed(1)}s)
                         </p>
                       </div>
                     </div>
@@ -959,9 +1027,6 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
               onChange={(e) => setTrackWidth(parseFloat(e.target.value))}
               className="w-full accent-teal-500 bg-neutral-800 rounded-lg h-1.5 cursor-pointer"
             />
-            <p className="text-[9px] text-neutral-500">
-              Nastro piatto e visibile che si stende a filo del terreno senza spessore verticale ingombrante.
-            </p>
           </div>
 
           {/* Track Color */}
@@ -1004,8 +1069,10 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
           {/* Duration Buttons */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-neutral-400 font-medium">Durata Video</span>
-              <span className="font-mono text-teal-300 font-bold">{duration} Secondi</span>
+              <span className="text-neutral-400 font-medium">Volo GPX + Outro Panoramico</span>
+              <span className="font-mono text-teal-300 font-bold">
+                {duration}s + 4s ({totalDuration}s Totali)
+              </span>
             </div>
             <div className="grid grid-cols-4 gap-1.5 p-1 bg-black/40 rounded-xl border border-white/5 text-xs">
               {[15, 30, 45, 60].map((d) => (
@@ -1018,7 +1085,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
                       : 'text-neutral-400 hover:text-white'
                   }`}
                 >
-                  {d}s
+                  {d}s (+4s)
                 </button>
               ))}
             </div>
@@ -1118,12 +1185,12 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
               className="w-full flex items-center justify-center gap-2 p-3 rounded-xl bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 text-white text-xs font-bold shadow-lg shadow-teal-500/20 transition-all hover:scale-[1.01] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Video className="w-4 h-4" />
-              <span>Genera Video {aspectRatio === '9:16' ? '1080×1920' : '1920×1080'} • {duration}s</span>
+              <span>Genera Video {aspectRatio === '9:16' ? '1080×1920' : '1920×1080'} • {totalDuration}s</span>
             </button>
           )}
 
           <p className="text-[10px] text-neutral-500 text-center">
-            MP4 H.264 • {duration * 30} fotogrammi renderizzati a 30fps {showHud ? 'con Telemetria HUD' : ''}
+            MP4 H.264 • {totalDuration * 30} fotogrammi renderizzati a 30fps (include 4s outro)
           </p>
         </div>
       </div>
@@ -1135,7 +1202,9 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
           <div className="glass-panel-subtle px-3.5 py-1.5 rounded-full border border-white/10 pointer-events-auto flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
             <span className="text-xs font-mono tracking-wider text-neutral-200 uppercase">
-              {directorType === 'keyframe'
+              {timeProgress.isOutro
+                ? '🎬 Outro Finale: Zoom-Out Totale (4s)'
+                : directorType === 'keyframe'
                 ? `Regia Keyframe (${keyframes.length} scene)`
                 : `Regia Auto • ${CAMERA_MODES[cameraMode]?.name}`}
             </span>
@@ -1187,11 +1256,18 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
                 </div>
 
                 <div className="text-right">
-                  <span className="text-base font-extrabold text-teal-300 font-mono">
-                    {currentTelemetry.eleM} m
-                  </span>
+                  {timeProgress.isOutro ? (
+                    <div className="flex items-center gap-1 text-amber-300 font-bold text-xs">
+                      <Award className="w-4 h-4 text-amber-400" />
+                      <span>Arrivo Finale</span>
+                    </div>
+                  ) : (
+                    <span className="text-base font-extrabold text-teal-300 font-mono">
+                      {currentTelemetry.eleM} m
+                    </span>
+                  )}
                   <p className="text-[10px] text-neutral-400 font-mono">
-                    {(previewProgress * 100).toFixed(0)}% percorso
+                    {(timeProgress.trailProgress * 100).toFixed(0)}% percorso
                   </p>
                 </div>
               </div>
@@ -1221,7 +1297,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
                     const areaD = `M 0,38 L ${pathPoints.join(' L ')} L 100,38 Z`;
                     const lineD = `M ${pathPoints.join(' L ')}`;
 
-                    const curX = previewProgress * 100;
+                    const curX = timeProgress.trailProgress * 100;
                     const curY = 38 - ((currentTelemetry.eleM - minE) / spanE) * 34;
 
                     return (
@@ -1313,7 +1389,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
         {sceneReady && !isBuilding && (
           <div className="absolute bottom-0 left-0 right-0 z-20 p-4 bg-gradient-to-t from-[#0c1017]/95 via-[#0c1017]/70 to-transparent backdrop-blur-sm">
             <div className="flex flex-col gap-2 max-w-3xl mx-auto bg-black/75 p-3 rounded-2xl border border-white/10 shadow-2xl">
-              {/* Timeline with Keyframe Visual Markers */}
+              {/* Timeline with Keyframe Visual Markers & Outro Section */}
               <div className="relative w-full flex items-center">
                 <input
                   type="range"
@@ -1328,23 +1404,26 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
                 {/* Keyframe Visual Pins on Timeline */}
                 {directorType === 'keyframe' && (
                   <div className="absolute inset-x-0 top-0 bottom-0 pointer-events-none flex items-center">
-                    {keyframes.map((kf) => (
-                      <div
-                        key={kf.id}
-                        style={{ left: `${kf.t * 100}%` }}
-                        className={`absolute w-3.5 h-3.5 -ml-1.5 rounded-full border-2 transform transition-transform ${
-                          selectedKeyframeId === kf.id
-                            ? 'bg-amber-400 border-white scale-125 z-20 shadow-md shadow-amber-500/50'
-                            : 'bg-amber-500 border-black/80 scale-100 z-10'
-                        }`}
-                        title={`${kf.name} (${(kf.t * duration).toFixed(0)}s)`}
-                      />
-                    ))}
+                    {keyframes.map((kf) => {
+                      const pinLeft = ((kf.t * duration) / totalDuration) * 100;
+                      return (
+                        <div
+                          key={kf.id}
+                          style={{ left: `${pinLeft}%` }}
+                          className={`absolute w-3.5 h-3.5 -ml-1.5 rounded-full border-2 transform transition-transform ${
+                            selectedKeyframeId === kf.id
+                              ? 'bg-amber-400 border-white scale-125 z-20 shadow-md shadow-amber-500/50'
+                              : 'bg-amber-500 border-black/80 scale-100 z-10'
+                          }`}
+                          title={`${kf.name} (${(kf.t * duration).toFixed(0)}s)`}
+                        />
+                      );
+                    })}
                   </div>
                 )}
               </div>
 
-              {/* Bottom Playback Buttons & Time Display */}
+              {/* Bottom Playback Buttons, Outro Badge & Time Display */}
               <div className="flex items-center justify-between pt-1">
                 <div className="flex items-center gap-3">
                   {/* Play / Pause Button */}
@@ -1357,8 +1436,14 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
                   </button>
 
                   <span className="text-xs font-mono text-neutral-300 font-bold">
-                    {Math.floor(previewProgress * duration)}s / {duration}s
+                    {Math.floor(previewProgress * totalDuration)}s / {totalDuration}s
                   </span>
+
+                  {timeProgress.isOutro && (
+                    <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-bold animate-pulse">
+                      🎬 Zoom Out Finale (4s)
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2">
