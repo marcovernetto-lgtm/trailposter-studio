@@ -904,42 +904,11 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
         className="hidden"
       />
 
-      {/* Sidebar Controls (Left - 4 Cols on LG) - Minimal & Clean in Teal / Slate */}
-      <div className="lg:col-span-4 h-[calc(100vh-100px)] sticky top-20 flex flex-col space-y-3 overflow-y-auto custom-scrollbar pr-1">
-        {/* Card 1: Satellite Resolution (Always Ultra 4K Max) */}
-        <div className="glass-card p-3.5 rounded-2xl border border-white/10 bg-[#181a20]/95 shadow-md space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Layers className="w-4 h-4 text-teal-400" />
-              <div>
-                <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-                  Mappa Satellite 4K Ultra HD
-                </h3>
-                <p className="text-[10px] text-neutral-400">Esri World Imagery Fotografico Max</p>
-              </div>
-            </div>
-            <button
-              onClick={buildScene}
-              disabled={isBuilding}
-              className="text-neutral-400 hover:text-teal-300 transition-colors p-1.5 rounded-lg hover:bg-white/5"
-              title="Ricarica Terreno 3D in 4K"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isBuilding ? 'animate-spin text-teal-400' : ''}`} />
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between px-3 py-2 bg-black/40 rounded-xl border border-teal-500/20 text-xs">
-            <span className="text-neutral-300 font-medium flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
-              Risoluzione Mappa:
-            </span>
-            <span className="font-mono text-teal-300 font-bold">Ultra 4K Max</span>
-          </div>
-        </div>
-
-        {/* Card 2: Tappe sul Percorso (Cartelli 3D & Modifica Dati) */}
-        <div className="glass-card p-3.5 rounded-2xl border border-white/10 bg-[#181a20]/95 shadow-md space-y-3">
-          <div className="flex items-center justify-between border-b border-white/5 pb-2">
+      {/* Sidebar Controls (Left - 4 Cols on LG) - Compact, Streamlined & Minimal */}
+      <div className="lg:col-span-4 h-[calc(100vh-100px)] sticky top-20 flex flex-col space-y-2.5 overflow-y-auto custom-scrollbar pr-1">
+        {/* Card 1: Tappe sul Percorso (Cartelli 3D & Modifica Dati) */}
+        <div className="glass-card p-3 rounded-2xl border border-white/10 bg-[#181a20]/95 shadow-md space-y-2.5">
+          <div className="flex items-center justify-between border-b border-white/5 pb-1.5">
             <div className="flex items-center gap-2">
               <MapPin className="w-4 h-4 text-teal-400" />
               <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-200">
@@ -961,12 +930,12 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
           <button
             onClick={handleAutoFindTowns}
             disabled={isAutoFindingTowns || !points || points.length < 2}
-            className="w-full flex items-center justify-center gap-2 p-2.5 rounded-xl bg-gradient-to-r from-teal-700/80 to-emerald-600/80 hover:from-teal-600 hover:to-emerald-500 text-white text-xs font-bold shadow transition-all border border-teal-400/30 disabled:opacity-50 disabled:cursor-not-allowed active:scale-98"
+            className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-gradient-to-r from-teal-700/80 to-emerald-600/80 hover:from-teal-600 hover:to-emerald-500 text-white text-xs font-bold shadow transition-all border border-teal-400/30 disabled:opacity-50 disabled:cursor-not-allowed active:scale-98"
           >
             {isAutoFindingTowns ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-200" />
-                <span>Rilevamento paesi in corso...</span>
+                <span>Rilevamento paesi...</span>
               </>
             ) : (
               <>
@@ -977,22 +946,22 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
           </button>
 
           {/* Add / Search New Waypoint */}
-          <div className="space-y-2 pt-1 border-t border-white/5">
+          <div className="space-y-1.5 pt-0.5 border-t border-white/5">
             <div className="flex gap-1.5">
               <input
                 type="text"
-                placeholder="Cerca o inserisci nome (es. Rifugio, Passo)..."
+                placeholder="Cerca o inserisci nome tappa..."
                 value={newWaypointName}
                 onChange={(e) => setNewWaypointName(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handleSearchPlace();
                 }}
-                className="flex-1 bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-teal-400"
+                className="flex-1 bg-black/40 border border-white/10 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-teal-400"
               />
               <button
                 onClick={handleSearchPlace}
                 disabled={!newWaypointName.trim() || isSearchingTown}
-                className="p-2 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 text-teal-300 rounded-xl transition-all"
+                className="p-1.5 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 text-teal-300 rounded-xl transition-all"
                 title="Cerca luogo esatto su mappa"
               >
                 {isSearchingTown ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
@@ -1001,14 +970,14 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
                 onClick={handleAddWaypoint}
                 disabled={!newWaypointName.trim()}
                 className="px-2.5 py-1.5 bg-teal-600 hover:bg-teal-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold flex items-center gap-1 transition-all"
-                title="Aggiungi con percentuale manuale"
+                title="Aggiungi con percentuale"
               >
                 <Plus className="w-3.5 h-3.5" />
               </button>
             </div>
 
-            <div className="space-y-1">
-              <div className="flex justify-between text-[11px] text-neutral-400">
+            <div className="space-y-0.5">
+              <div className="flex justify-between text-[10px] text-neutral-400">
                 <span>Posizione nuova tappa</span>
                 <span className="font-mono text-teal-300 font-bold">{newWaypointPercent}%</span>
               </div>
@@ -1024,17 +993,16 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
             </div>
           </div>
 
-          {/* Editable Waypoints List with Inline Name & Percent Controls */}
+          {/* Editable Waypoints List */}
           {waypoints.length > 0 ? (
-            <div className="space-y-2 max-h-52 overflow-y-auto custom-scrollbar pr-1">
+            <div className="space-y-1.5 max-h-44 overflow-y-auto custom-scrollbar pr-1">
               {waypoints.map((wpt, idx) => (
                 <div
                   key={wpt.id || idx}
-                  className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-xs space-y-2 transition-all hover:border-teal-500/40"
+                  className="p-2 rounded-xl bg-white/5 border border-white/10 text-xs space-y-1.5 transition-all hover:border-teal-500/40"
                 >
-                  {/* Top: Index, Editable Name Input, Delete Button */}
                   <div className="flex items-center gap-1.5">
-                    <span className="w-5 h-5 rounded-full bg-teal-500/20 text-teal-300 flex items-center justify-center font-mono font-bold text-[10px] flex-shrink-0">
+                    <span className="w-4 h-4 rounded-full bg-teal-500/20 text-teal-300 flex items-center justify-center font-mono font-bold text-[9px] flex-shrink-0">
                       {idx + 1}
                     </span>
                     <input
@@ -1042,21 +1010,20 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
                       value={wpt.name}
                       onChange={(e) => handleUpdateWaypointName(wpt.id, e.target.value)}
                       placeholder="Nome tappa..."
-                      className="flex-1 bg-black/50 border border-white/10 rounded-lg px-2 py-1 text-xs font-bold text-white focus:outline-none focus:border-teal-400 transition-all"
+                      className="flex-1 bg-black/50 border border-white/10 rounded-lg px-2 py-0.5 text-xs font-bold text-white focus:outline-none focus:border-teal-400 transition-all"
                     />
                     <button
                       onClick={() => handleRemoveWaypoint(wpt.id)}
                       className="text-neutral-500 hover:text-rose-400 p-1 transition-colors flex-shrink-0"
                       title="Elimina tappa"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-3 h-3" />
                     </button>
                   </div>
 
-                  {/* Bottom: Interactive Percentage Slider on Trail */}
-                  <div className="space-y-0.5 pl-6">
-                    <div className="flex items-center justify-between text-[10px] text-neutral-400">
-                      <span>Posizione sul tracciato</span>
+                  <div className="space-y-0.5 pl-5">
+                    <div className="flex items-center justify-between text-[9px] text-neutral-400">
+                      <span>Posizione lungo il tracciato</span>
                       <span className="font-mono text-teal-300 font-bold">{wpt.percent ?? 0}%</span>
                     </div>
                     <input
@@ -1079,9 +1046,9 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
           )}
         </div>
 
-        {/* Card 3: Regia Telecamera (Automatica vs Keyframe) */}
-        <div className="glass-card p-3.5 rounded-2xl border border-white/10 space-y-3 bg-[#181a20]/95 shadow-md">
-          <div className="flex items-center justify-between border-b border-white/5 pb-2">
+        {/* Card 2: Regia Telecamera (Automatica vs Keyframe) */}
+        <div className="glass-card p-3 rounded-2xl border border-white/10 space-y-2 bg-[#181a20]/95 shadow-md">
+          <div className="flex items-center justify-between border-b border-white/5 pb-1.5">
             <div className="flex items-center gap-2">
               <Camera className="w-4 h-4 text-teal-400" />
               <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-200">
@@ -1092,7 +1059,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
             <div className="flex items-center bg-black/40 p-0.5 rounded-lg border border-white/10 text-[10px] font-bold">
               <button
                 onClick={() => setDirectorType('auto')}
-                className={`px-2 py-1 rounded-md transition-all ${
+                className={`px-2 py-0.5 rounded-md transition-all ${
                   directorType === 'auto'
                     ? 'bg-teal-600 text-white shadow'
                     : 'text-neutral-400 hover:text-white'
@@ -1102,7 +1069,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
               </button>
               <button
                 onClick={() => setDirectorType('keyframe')}
-                className={`px-2 py-1 rounded-md transition-all ${
+                className={`px-2 py-0.5 rounded-md transition-all ${
                   directorType === 'keyframe'
                     ? 'bg-teal-600 text-white shadow'
                     : 'text-neutral-400 hover:text-white'
@@ -1114,14 +1081,14 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
           </div>
 
           {directorType === 'auto' ? (
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-1.5">
               {Object.entries(CAMERA_MODES)
                 .filter(([k]) => k !== 'keyframe')
                 .map(([key, mode]) => (
                   <button
                     key={key}
                     onClick={() => handleCameraModeChange(key)}
-                    className={`p-2 rounded-xl text-left transition-all border ${
+                    className={`p-1.5 rounded-xl text-left transition-all border ${
                       cameraMode === key
                         ? 'border-teal-500 bg-teal-500/20 text-teal-200 ring-1 ring-teal-500/30'
                         : 'border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10'
@@ -1133,7 +1100,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
                 ))}
             </div>
           ) : (
-            <div className="space-y-2.5 animate-fadeIn">
+            <div className="space-y-2 animate-fadeIn">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] text-neutral-300 font-semibold flex items-center gap-1.5">
                   <Key className="w-3.5 h-3.5 text-amber-400" />
@@ -1149,13 +1116,13 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
 
               <button
                 onClick={handleAddKeyframe}
-                className="w-full flex items-center justify-center gap-1.5 p-2 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 text-white text-xs font-bold shadow transition-all active:scale-98"
+                className="w-full flex items-center justify-center gap-1.5 p-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 text-white text-xs font-bold shadow transition-all active:scale-98"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Salva Inquadratura a {(previewProgress * totalDuration).toFixed(0)}s</span>
               </button>
 
-              <div className="space-y-1 max-h-32 overflow-y-auto custom-scrollbar pr-1">
+              <div className="space-y-1 max-h-28 overflow-y-auto custom-scrollbar pr-1">
                 {keyframes.map((kf, idx) => (
                   <div
                     key={kf.id}
@@ -1192,9 +1159,9 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
           )}
         </div>
 
-        {/* Card 4: Rilievo Altimetrico & Nastro GPX */}
-        <div className="glass-card p-3.5 rounded-2xl border border-white/10 space-y-3 bg-[#181a20]/95 shadow-md">
-          <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+        {/* Card 3: Rilievo Altimetrico & Nastro GPX */}
+        <div className="glass-card p-3 rounded-2xl border border-white/10 space-y-2.5 bg-[#181a20]/95 shadow-md">
+          <div className="flex items-center gap-2 border-b border-white/5 pb-1.5">
             <Mountain className="w-4 h-4 text-teal-400" />
             <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-200">
               Rilievo & Traccia GPX
@@ -1203,8 +1170,8 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
 
           <div className="space-y-1">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-neutral-400 font-medium">Esagerazione Montagne</span>
-              <span className="font-mono text-teal-300 font-bold">{heightExaggeration.toFixed(1)}×</span>
+              <span className="text-neutral-400 font-medium text-[11px]">Esagerazione Montagne</span>
+              <span className="font-mono text-teal-300 font-bold text-xs">{heightExaggeration.toFixed(1)}×</span>
             </div>
             <input
               type="range"
@@ -1219,8 +1186,8 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
 
           <div className="space-y-1">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-neutral-400 font-medium">Larghezza Nastro Piatto</span>
-              <span className="font-mono text-teal-300 font-bold">{trackWidth.toFixed(1)} m</span>
+              <span className="text-neutral-400 font-medium text-[11px]">Larghezza Nastro</span>
+              <span className="font-mono text-teal-300 font-bold text-xs">{trackWidth.toFixed(1)} m</span>
             </div>
             <input
               type="range"
@@ -1233,8 +1200,8 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
             />
           </div>
 
-          <div className="space-y-1.5">
-            <span className="text-xs text-neutral-400 font-medium block">Colore Traccia</span>
+          <div className="space-y-1">
+            <span className="text-[11px] text-neutral-400 font-medium block">Colore Traccia</span>
             <div className="flex items-center gap-2 flex-wrap">
               {TRACK_PRESET_COLORS.map((c) => (
                 <button
@@ -1260,18 +1227,18 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
           </div>
         </div>
 
-        {/* Card 5: Formato Video & Durata */}
-        <div className="glass-card p-3.5 rounded-2xl border border-white/10 space-y-3 bg-[#181a20]/95 shadow-md">
-          <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+        {/* Card 4: Formato Video & Durata */}
+        <div className="glass-card p-3 rounded-2xl border border-white/10 space-y-2 bg-[#181a20]/95 shadow-md">
+          <div className="flex items-center gap-2 border-b border-white/5 pb-1.5">
             <Video className="w-4 h-4 text-teal-400" />
             <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-200">
               Formato & Durata
             </h3>
           </div>
 
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-neutral-400 font-medium">Volo + Outro Panoramico</span>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-neutral-400 font-medium">Volo + Outro (7s)</span>
               <span className="font-mono text-teal-300 font-bold">
                 {duration}s + 7s ({totalDuration}s)
               </span>
@@ -1293,10 +1260,10 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-1.5">
             <button
               onClick={() => setAspectRatio('16:9')}
-              className={`flex items-center justify-center gap-1.5 p-2 rounded-xl text-xs font-semibold transition-all border ${
+              className={`flex items-center justify-center gap-1.5 p-1.5 rounded-xl text-xs font-semibold transition-all border ${
                 aspectRatio === '16:9'
                   ? 'border-teal-500 bg-teal-500/20 text-teal-300'
                   : 'border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10'
@@ -1307,20 +1274,20 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
             </button>
             <button
               onClick={() => setAspectRatio('9:16')}
-              className={`flex items-center justify-center gap-1.5 p-2 rounded-xl text-xs font-semibold transition-all border ${
+              className={`flex items-center justify-center gap-1.5 p-1.5 rounded-xl text-xs font-semibold transition-all border ${
                 aspectRatio === '9:16'
                   ? 'border-teal-500 bg-teal-500/20 text-teal-300'
                   : 'border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10'
               }`}
             >
               <Smartphone className="w-3.5 h-3.5" />
-              9:16 Reels / TikTok
+              9:16 Verticale
             </button>
           </div>
         </div>
 
-        {/* Card 6: Telemetria HUD Switch & Position (Default: In alto a sinistra) */}
-        <div className="glass-card p-3.5 rounded-2xl border border-white/10 space-y-2 bg-[#181a20]/95 shadow-md">
+        {/* Card 5: Telemetria HUD Switch & Position (Default: In alto a sinistra) */}
+        <div className="glass-card p-3 rounded-2xl border border-white/10 space-y-2 bg-[#181a20]/95 shadow-md">
           <div className="flex items-center justify-between border-b border-white/5 pb-1.5">
             <div className="flex items-center gap-2">
               <Activity className="w-4 h-4 text-teal-400" />
@@ -1340,54 +1307,54 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
           </div>
 
           {showHud && (
-            <div className="grid grid-cols-2 gap-1 text-[11px] pt-1">
+            <div className="grid grid-cols-4 gap-1 text-[10px] pt-0.5">
               <button
                 onClick={() => setHudPosition('top_left')}
-                className={`py-1 px-2 rounded-lg border font-medium transition-all ${
+                className={`py-1 px-1 rounded-lg border font-medium transition-all text-center ${
                   hudPosition === 'top_left'
-                    ? 'border-teal-500 bg-teal-500/20 text-teal-300'
+                    ? 'border-teal-500 bg-teal-500/20 text-teal-300 font-bold'
                     : 'border-white/10 bg-white/5 text-neutral-400 hover:text-white'
                 }`}
               >
-                In Alto a Sx
+                Alto Sx
               </button>
               <button
                 onClick={() => setHudPosition('top_right')}
-                className={`py-1 px-2 rounded-lg border font-medium transition-all ${
+                className={`py-1 px-1 rounded-lg border font-medium transition-all text-center ${
                   hudPosition === 'top_right'
-                    ? 'border-teal-500 bg-teal-500/20 text-teal-300'
+                    ? 'border-teal-500 bg-teal-500/20 text-teal-300 font-bold'
                     : 'border-white/10 bg-white/5 text-neutral-400 hover:text-white'
                 }`}
               >
-                In Alto a Dx
+                Alto Dx
               </button>
               <button
                 onClick={() => setHudPosition('bottom_left')}
-                className={`py-1 px-2 rounded-lg border font-medium transition-all ${
+                className={`py-1 px-1 rounded-lg border font-medium transition-all text-center ${
                   hudPosition === 'bottom_left'
-                    ? 'border-teal-500 bg-teal-500/20 text-teal-300'
+                    ? 'border-teal-500 bg-teal-500/20 text-teal-300 font-bold'
                     : 'border-white/10 bg-white/5 text-neutral-400 hover:text-white'
                 }`}
               >
-                In Basso a Sx
+                Basso Sx
               </button>
               <button
                 onClick={() => setHudPosition('bottom_right')}
-                className={`py-1 px-2 rounded-lg border font-medium transition-all ${
+                className={`py-1 px-1 rounded-lg border font-medium transition-all text-center ${
                   hudPosition === 'bottom_right'
-                    ? 'border-teal-500 bg-teal-500/20 text-teal-300'
+                    ? 'border-teal-500 bg-teal-500/20 text-teal-300 font-bold'
                     : 'border-white/10 bg-white/5 text-neutral-400 hover:text-white'
                 }`}
               >
-                In Basso a Dx
+                Basso Dx
               </button>
             </div>
           )}
         </div>
 
-        {/* Card 7: Generazione & Esportazione MP4 */}
-        <div className="glass-card p-3.5 rounded-2xl border border-teal-500/40 space-y-2.5 bg-[#181a20]/95 shadow-xl">
-          <div className="flex items-center gap-2 border-b border-white/5 pb-1.5">
+        {/* Card 6: Generazione & Esportazione MP4 */}
+        <div className="glass-card p-3 rounded-2xl border border-teal-500/40 space-y-2 bg-[#181a20]/95 shadow-xl">
+          <div className="flex items-center gap-2 border-b border-white/5 pb-1">
             <Sparkles className="w-4 h-4 text-teal-400" />
             <h3 className="text-xs font-bold uppercase tracking-wider text-teal-200">
               Esporta Video MP4 Full HD
@@ -1409,9 +1376,9 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
           )}
 
           {isExporting && (
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <div className="flex items-center justify-between text-xs">
-                <span className="text-neutral-400 flex items-center gap-1.5 truncate">
+                <span className="text-neutral-400 flex items-center gap-1.5 truncate text-[11px]">
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-400" />
                   {exportMessage}
                 </span>
@@ -1427,10 +1394,10 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
           )}
 
           {exportedUrl && !isExporting && (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <button
                 onClick={handleDownload}
-                className="w-full flex items-center justify-center gap-2 p-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 text-white text-xs font-bold shadow transition-all hover:scale-[1.01] active:scale-95"
+                className="w-full flex items-center justify-center gap-2 p-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 text-white text-xs font-bold shadow transition-all hover:scale-[1.01] active:scale-95"
               >
                 <Download className="w-4 h-4" />
                 Scarica Video MP4 (1080p)
@@ -1468,6 +1435,14 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
 
           {sceneReady && (
             <div className="flex items-center gap-2 pointer-events-auto">
+              <button
+                onClick={buildScene}
+                disabled={isBuilding}
+                className="p-2 rounded-xl border border-white/10 bg-black/60 text-neutral-300 hover:bg-black/80 hover:text-white transition-all shadow-md"
+                title="Ricarica Terreno 3D"
+              >
+                <RefreshCw className={`w-4 h-4 ${isBuilding ? 'animate-spin text-teal-400' : ''}`} />
+              </button>
               <button
                 onClick={handleReset}
                 className="p-2 rounded-xl border border-white/10 bg-black/60 text-neutral-300 hover:bg-black/80 hover:text-white transition-all shadow-md"
