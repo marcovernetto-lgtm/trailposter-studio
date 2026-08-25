@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .glass-panel {
+    background: rgba(28, 31, 38, 0.82);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .glass-panel-subtle {
+    background: rgba(38, 42, 52, 0.6);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .glass-input {
+    background: rgba(18, 20, 25, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #f1f5f9;
+    transition: all 0.2s ease;
+  }
+
+  .glass-input:focus {
+    border-color: #14b8a6;
+    box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.25);
+    outline: none;
+  }
+}
+
+/* Base Body Dark Charcoal Gray */
+body {
+  background-color: #121316;
+  color: #e2e8f0;
+}
+
+/* Custom scrollbars - Dark Gray Theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(20, 22, 27, 0.6);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(60, 65, 78, 0.8);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(20, 184, 166, 0.8);
+}
+
+/* Custom range slider styling */
+input[type="range"] {
+  accent-color: #14b8a6;
+}
+
+/* Ensure Leaflet container background is fully transparent */
+.leaflet-container {
+  background: transparent !important;
+  background-color: transparent !important;
+}

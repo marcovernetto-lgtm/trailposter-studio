@@ -1,0 +1,27 @@
+{
+  "name": "TrailPoster Studio",
+  "short_name": "TrailPoster",
+  "description": "Generatore minimalista di poster GPX artistici per la stampa 50x70",
+  "start_url": "/",
+  "id": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#121316",
+  "theme_color": "#0d9488",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["photo", "graphics", "lifestyle", "sports"],
+  "shortcuts": [
+    {
+      "name": "Nuovo Poster",
+      "url": "/",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }]
+    }
+  ]
+}
