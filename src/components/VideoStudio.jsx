@@ -21,6 +21,7 @@ import {
   Plus,
   Trash2,
   Key,
+  Flame,
 } from 'lucide-react';
 import { buildTerrainScene } from '../lib/terrainEngine';
 import { createCameraController, CAMERA_MODES, resetCameraState } from '../lib/cameraSystem';
@@ -43,9 +44,10 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
   const [sceneError, setSceneError] = useState(null);
 
   // Visual & Quality Settings
+  const [satelliteQuality, setSatelliteQuality] = useState('ultra'); // 'ultra' | 'high' | 'standard'
   const [heightExaggeration, setHeightExaggeration] = useState(1.6);
   const [trackColor, setTrackColor] = useState(config?.trackColor || '#14b8a6');
-  const [trackWidth, setTrackWidth] = useState(0.8); // Slim elegant track by default
+  const [trackWidth, setTrackWidth] = useState(0.7); // Slim, high-definition track
   const [duration, setDuration] = useState(30);
   const [aspectRatio, setAspectRatio] = useState('16:9');
 
@@ -76,7 +78,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
     setIsBuilding(true);
     setBuildProgress(0);
-    setBuildMessage('Caricamento immagini satellitari HD...');
+    setBuildMessage('Scaricamento immagini satellitari 4K...');
     setSceneReady(false);
     setSceneError(null);
 
@@ -98,10 +100,11 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       const sceneData = await buildTerrainScene(
         points,
         {
+          quality: satelliteQuality,
           heightExaggeration,
           trackColor,
           trackWidth,
-          padding: 0.32,
+          padding: 0.22,
         },
         (pct, msg) => {
           setBuildProgress(pct);
@@ -147,7 +150,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
         controls.screenSpacePanning = true;
         controls.minDistance = 15;
         controls.maxDistance = 3500;
-        controls.maxPolarAngle = Math.PI / 2 - 0.05; // Don't go below ground horizon
+        controls.maxPolarAngle = Math.PI / 2 - 0.05;
 
         controls.addEventListener('start', () => {
           isOrbitInteractingRef.current = true;
@@ -201,7 +204,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     } finally {
       setIsBuilding(false);
     }
-  }, [points, heightExaggeration, trackColor, trackWidth]);
+  }, [points, satelliteQuality, heightExaggeration, trackColor, trackWidth]);
 
   // Initial load & trigger build on point/elevation changes
   useEffect(() => {
@@ -212,7 +215,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       if (animIdRef.current) cancelAnimationFrame(animIdRef.current);
       if (orbitControlsRef.current) orbitControlsRef.current.dispose();
     };
-  }, [points, heightExaggeration, trackColor, trackWidth]);
+  }, [points, satelliteQuality, heightExaggeration, trackColor, trackWidth]);
 
   // Responsive Canvas Resize Observer
   useEffect(() => {
@@ -479,26 +482,64 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
 
       {/* Sidebar Controls (Left - 4 Cols on LG) */}
       <div className="lg:col-span-4 h-[calc(100vh-100px)] sticky top-20 flex flex-col space-y-3.5 overflow-y-auto custom-scrollbar pr-1">
-        {/* Card 1: Satellite HD Badge & Reload */}
-        <div className="glass-card p-3.5 rounded-2xl border border-teal-500/30 bg-[#181a20]/95 shadow-lg flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <span className="text-xl">🛰️</span>
-            <div>
-              <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
-                Satellite HD Max Resolution
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              </h3>
-              <p className="text-[10px] text-teal-300">Texture fotorealistica con filtro anisotropico 16×</p>
+        {/* Card 1: Satellite 4K Quality Selector */}
+        <div className="glass-card p-4 rounded-2xl border border-teal-500/40 bg-[#181a20]/95 shadow-xl space-y-2.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-xl">🛰️</span>
+              <div>
+                <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                  Dettaglio Satellite Fotografico
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                </h3>
+                <p className="text-[10px] text-neutral-400">Esri World Imagery ad altissima nitidezza</p>
+              </div>
             </div>
+            <button
+              onClick={buildScene}
+              disabled={isBuilding}
+              className="text-neutral-400 hover:text-teal-300 transition-colors p-1.5 rounded-lg hover:bg-white/5"
+              title="Ricarica Terreno 3D"
+            >
+              <RefreshCw className={`w-4 h-4 ${isBuilding ? 'animate-spin text-teal-400' : ''}`} />
+            </button>
           </div>
-          <button
-            onClick={buildScene}
-            disabled={isBuilding}
-            className="text-neutral-400 hover:text-teal-300 transition-colors p-1.5 rounded-lg hover:bg-white/5"
-            title="Ricarica Terreno 3D"
-          >
-            <RefreshCw className={`w-4 h-4 ${isBuilding ? 'animate-spin text-teal-400' : ''}`} />
-          </button>
+
+          <div className="grid grid-cols-3 gap-1.5 p-1 bg-black/40 rounded-xl border border-white/5 text-[11px]">
+            <button
+              onClick={() => setSatelliteQuality('ultra')}
+              className={`py-1.5 px-2 rounded-lg font-bold transition-all flex flex-col items-center gap-0.5 ${
+                satelliteQuality === 'ultra'
+                  ? 'bg-teal-600 text-white shadow-md'
+                  : 'text-neutral-400 hover:text-white'
+              }`}
+            >
+              <span className="text-xs">🌟 Ultra 4K</span>
+              <span className="text-[9px] opacity-75 font-mono">Zoom 16-17</span>
+            </button>
+            <button
+              onClick={() => setSatelliteQuality('high')}
+              className={`py-1.5 px-2 rounded-lg font-bold transition-all flex flex-col items-center gap-0.5 ${
+                satelliteQuality === 'high'
+                  ? 'bg-teal-600 text-white shadow-md'
+                  : 'text-neutral-400 hover:text-white'
+              }`}
+            >
+              <span className="text-xs">⚡ Super HD</span>
+              <span className="text-[9px] opacity-75 font-mono">Zoom 15-16</span>
+            </button>
+            <button
+              onClick={() => setSatelliteQuality('standard')}
+              className={`py-1.5 px-2 rounded-lg font-bold transition-all flex flex-col items-center gap-0.5 ${
+                satelliteQuality === 'standard'
+                  ? 'bg-teal-600 text-white shadow-md'
+                  : 'text-neutral-400 hover:text-white'
+              }`}
+            >
+              <span className="text-xs">🚀 Veloce</span>
+              <span className="text-[9px] opacity-75 font-mono">Zoom 14</span>
+            </button>
+          </div>
         </div>
 
         {/* Card 2: Regia Telecamera (Automatica vs Keyframe Manuale) */}
