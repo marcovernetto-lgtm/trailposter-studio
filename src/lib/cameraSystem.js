@@ -204,20 +204,53 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
     const guideTangent = getGuideTangent(t);
 
     // 1. DRONE CINEMATICO
+    // Progression: Inizia da dietro -> ruota gradualmente sul fianco illuminato -> si sposta in avanti ad anticipare
     if (mode === 'drone') {
-      const followDist = 140;
-      const heightOffset = 65;
+      const sunDir = new THREE.Vector3(0.55, 0.75, 0.35).normalize();
+      const leftPerp = new THREE.Vector3(-guideTangent.z, 0, guideTangent.x).normalize();
+      const rightPerp = new THREE.Vector3(guideTangent.z, 0, -guideTangent.x).normalize();
+      const bestFlank = leftPerp.dot(sunDir) >= rightPerp.dot(sunDir) ? leftPerp : rightPerp;
 
-      const lookAheadT = Math.min(t + 0.06, 0.999);
-      const lookAheadPt = getTrackPoint(lookAheadT);
+      let forwardDist = -135; // negative = behind, positive = ahead
+      let sideDist = 0;       // lateral offset towards best exposed flank
+      let heightOffset = 55;  // vertical altitude above terrain
+      let lookTarget = getTrackPoint(Math.min(t + 0.05, 0.999));
+
+      if (t < 0.20) {
+        // Stage 1: Dietro all'atleta in inseguimento dinamico
+        forwardDist = -135;
+        sideDist = 0;
+        heightOffset = 55;
+        lookTarget = getTrackPoint(Math.min(t + 0.05, 0.999));
+      } else if (t < 0.65) {
+        // Stage 2: Rotazione graduale verso il fianco meglio esposto (3/4 vista vallata)
+        const p1 = (t - 0.20) / 0.45;
+        const smoothP1 = p1 * p1 * (3 - 2 * p1);
+        forwardDist = -135 + smoothP1 * 75; // -135 -> -60
+        sideDist = smoothP1 * 125;          // 0 -> 125m sul fianco
+        heightOffset = 55 + smoothP1 * 20;  // 55 -> 75m
+        lookTarget = getTrackPoint(Math.min(t + 0.04, 0.999));
+      } else {
+        // Stage 3: Verso la fine la telecamera vola in avanti ad anticipare l'arrivo
+        const p2 = (t - 0.65) / 0.35;
+        const smoothP2 = p2 * p2 * (3 - 2 * p2);
+        forwardDist = -60 + smoothP2 * 155; // -60 -> +95 (anticipo frontale)
+        sideDist = 125 - smoothP2 * 55;     // 125 -> 70 (inquadratura 3/4 anteriore)
+        heightOffset = 75 + smoothP2 * 12;  // 75 -> 87m
+        
+        // In anticipazione, guarda tra l'atleta in arrivo e il traguardo
+        const leadLook = currentTrackPt.clone().add(guideTangent.clone().multiplyScalar(15));
+        lookTarget = leadLook;
+      }
 
       desiredPosition
         .copy(guidePt)
-        .sub(guideTangent.clone().multiplyScalar(followDist))
+        .add(guideTangent.clone().multiplyScalar(forwardDist))
+        .add(bestFlank.clone().multiplyScalar(sideDist))
         .add(new THREE.Vector3(0, heightOffset, 0));
 
-      desiredPosition.y = Math.max(currentTrackPt.y + 40, desiredPosition.y);
-      desiredLookAt.copy(lookAheadPt).add(new THREE.Vector3(0, 8, 0));
+      desiredPosition.y = Math.max(currentTrackPt.y + 35, desiredPosition.y);
+      desiredLookAt.copy(lookTarget).add(new THREE.Vector3(0, 6, 0));
       lerpFactor = 0.035;
     }
 

@@ -56,7 +56,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
   // Visual & Quality Settings
   const [satelliteQuality, setSatelliteQuality] = useState('ultra'); // 'ultra' | 'high' | 'standard'
   const [heightExaggeration, setHeightExaggeration] = useState(1.6);
-  const [trackColor, setTrackColor] = useState(config?.trackColor || '#facc15'); // Traccia 3D di default Giallo Oro
+  const [trackColor, setTrackColor] = useState(config?.trackColor || '#ff5500'); // Traccia 3D di default Arancione ad alto contrasto
   const [trackWidth, setTrackWidth] = useState(1.4); // Wide flat ribbon width
   const [duration, setDuration] = useState(30); // Flyover duration in seconds
   const [aspectRatio, setAspectRatio] = useState('16:9');
@@ -823,8 +823,8 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
       ctx.closePath();
 
       const areaGrad = ctx.createLinearGradient(chartX, chartY, chartX, chartY + chartH);
-      areaGrad.addColorStop(0, 'rgba(250, 204, 21, 0.40)');
-      areaGrad.addColorStop(1, 'rgba(250, 204, 21, 0.02)');
+      areaGrad.addColorStop(0, 'rgba(255, 85, 0, 0.40)');
+      areaGrad.addColorStop(1, 'rgba(255, 85, 0, 0.02)');
       ctx.fillStyle = areaGrad;
       ctx.fill();
 
@@ -838,8 +838,8 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
         else ctx.lineTo(px, py);
       }
       ctx.lineTo(activeMarkerX, activeMarkerY);
-      ctx.strokeStyle = '#facc15';
-      ctx.lineWidth = 1.6 * baseScale;
+      ctx.strokeStyle = trackColor || '#ff5500';
+      ctx.lineWidth = 1.8 * baseScale;
       ctx.stroke();
 
       // Glowing Leading Dot
@@ -847,8 +847,8 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
       ctx.arc(activeMarkerX, activeMarkerY, 3.8 * baseScale, 0, Math.PI * 2);
       ctx.fillStyle = '#ffffff';
       ctx.fill();
-      ctx.strokeStyle = '#facc15';
-      ctx.lineWidth = 1.6 * baseScale;
+      ctx.strokeStyle = trackColor || '#ff5500';
+      ctx.lineWidth = 1.8 * baseScale;
       ctx.stroke();
 
       ctx.restore();
@@ -952,9 +952,10 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
   };
 
   const TRACK_PRESET_COLORS = [
+    { label: 'Arancione Neon', hex: '#ff5500' },
+    { label: 'Arancione Sunset', hex: '#f97316' },
     { label: 'Giallo Oro', hex: '#facc15' },
     { label: 'Ciano Neon', hex: '#14b8a6' },
-    { label: 'Ambra', hex: '#f59e0b' },
     { label: 'Corallo', hex: '#f43f5e' },
     { label: 'Viola', hex: '#8b5cf6' },
     { label: 'Smeraldo', hex: '#10b981' },
@@ -1679,8 +1680,8 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
                   <svg className="w-full h-full" viewBox="0 0 100 36" preserveAspectRatio="none">
                     <defs>
                       <linearGradient id="hudActiveAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#facc15" stopOpacity="0.4" />
-                        <stop offset="100%" stopColor="#facc15" stopOpacity="0.02" />
+                        <stop offset="0%" stopColor={trackColor || '#ff5500'} stopOpacity="0.4" />
+                        <stop offset="100%" stopColor={trackColor || '#ff5500'} stopOpacity="0.02" />
                       </linearGradient>
                     </defs>
 
@@ -1716,8 +1717,8 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
                         <>
                           <path d={ghostLineD} fill="none" stroke="rgba(255, 255, 255, 0.12)" strokeWidth="1.0" />
                           <path d={activeAreaD} fill="url(#hudActiveAreaGrad)" />
-                          <path d={activeLineD} fill="none" stroke="#facc15" strokeWidth="1.4" />
-                          <circle cx={curX} cy={curY} r="2.2" fill="#ffffff" stroke="#facc15" strokeWidth="1.2" />
+                          <path d={activeLineD} fill="none" stroke={trackColor || '#ff5500'} strokeWidth="1.6" />
+                          <circle cx={curX} cy={curY} r="2.4" fill="#ffffff" stroke={trackColor || '#ff5500'} strokeWidth="1.4" />
                         </>
                       );
                     })()}

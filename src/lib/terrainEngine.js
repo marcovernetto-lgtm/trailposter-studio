@@ -271,7 +271,7 @@ function createConformalFlatRibbonGeometry(
 export async function buildTerrainScene(trackPoints, options = {}, onProgress = () => {}) {
   const config = {
     heightExaggeration: 1.6,
-    trackColor: '#facc15', // Default: Yellow
+    trackColor: '#ff5500', // Default: High-Contrast Orange
     trackWidth: 1.4, // Wide flat ribbon width
     padding: 0.20, // 20% framing padding
     quality: 'ultra', // 'ultra' | 'high' | 'standard'
@@ -593,9 +593,9 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   const trackMaterial = new THREE.MeshStandardMaterial({
     color: config.trackColor,
     emissive: config.trackColor,
-    emissiveIntensity: 0.85,
-    roughness: 0.2,
-    metalness: 0.3,
+    emissiveIntensity: 1.25,
+    roughness: 0.15,
+    metalness: 0.35,
     side: THREE.DoubleSide,
     polygonOffset: true,
     polygonOffsetFactor: -2.0,
@@ -613,11 +613,11 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     : ribbonGeom.attributes.position.count;
 
   // 7. Sleek Leading Marker (Glowing Beacon Disc)
-  const markerGeom = new THREE.CylinderGeometry(config.trackWidth * 0.9, config.trackWidth * 0.9, 0.4, 24);
+  const markerGeom = new THREE.CylinderGeometry(config.trackWidth * 0.95, config.trackWidth * 0.95, 0.5, 24);
   const markerMaterial = new THREE.MeshStandardMaterial({
     color: '#ffffff',
     emissive: config.trackColor,
-    emissiveIntensity: 1.0,
+    emissiveIntensity: 1.35,
     roughness: 0.1,
     metalness: 0.2,
     polygonOffset: true,

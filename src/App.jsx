@@ -51,7 +51,7 @@ export const DEFAULT_CONFIG = {
   elevationPosition: 'below_text',
   elevationStyle: 'gradient',
 
-  trackColor: '#facc15',
+  trackColor: '#ff5500',
   trackWidth: 5.0,
   trackPadding: 20,
   trackOpacity: 1.0,
