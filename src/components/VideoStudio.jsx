@@ -84,7 +84,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
   const rawPoints = trackData?.points || [];
   const rawStats = trackData?.stats || {};
 
-  // Process points with cumulative distance in meters and cumulative elevation gain in meters
+  // Process points with cumulative distance and cumulative elevation gain
   const { points, totalDistanceM, totalDistanceKm, minElevation, maxElevation, totalElevationGain } = useMemo(() => {
     if (!rawPoints || rawPoints.length < 2) {
       return {
@@ -151,7 +151,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
   // Calculate live dynamic telemetry based on current trail progress
   const currentTelemetry = useMemo(() => {
     if (!points || points.length < 2) {
-      return { distKm: '0.0', eleM: 0, gainM: 0, isOutro: false };
+      return { distKm: '0.0', eleM: 0, gainM: 0, ptIndex: 0, isOutro: false };
     }
 
     const { trailProgress, isOutro } = timeProgress;
@@ -178,6 +178,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       distKm: currentDistKm,
       eleM: Math.round(currentPt.ele || 0),
       gainM: Math.round(isOutro ? totalElevationGain : currentPt.cumGain || 0),
+      ptIndex,
       isOutro,
     };
   }, [points, totalDistanceM, totalElevationGain, timeProgress]);
@@ -525,15 +526,15 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
     }
   };
 
-  // Draw 2D Liquid Glass Telemetry HUD on Exported Video Frame
+  // Draw Minimal Progressive Liquid Glass Telemetry HUD on Exported Video Frame
   const drawHudOnVideo = useCallback(
     (ctx, width, height, progress) => {
       if (!showHud || !points || points.length < 2) return;
 
       const scale = width / 1920;
-      const cardW = 350 * scale;
-      const cardH = 138 * scale;
-      const margin = 36 * scale;
+      const cardW = 320 * scale;
+      const cardH = 110 * scale;
+      const margin = 32 * scale;
 
       let cardX = margin;
       let cardY = height - cardH - margin;
@@ -561,13 +562,13 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       const curEle = Math.round(curPt.ele || 0);
       const curGain = Math.round(isOutro ? totalElevationGain : curPt.cumGain || 0);
 
-      // 1. Draw Frosted Glass Card Background
+      // 1. Draw Minimal Frosted Glass Card Background
       ctx.save();
-      ctx.fillStyle = 'rgba(10, 14, 20, 0.75)';
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
-      ctx.lineWidth = 1.5 * scale;
+      ctx.fillStyle = 'rgba(10, 14, 20, 0.65)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
+      ctx.lineWidth = 1.2 * scale;
 
-      const r = 16 * scale;
+      const r = 14 * scale;
       ctx.beginPath();
       ctx.moveTo(cardX + r, cardY);
       ctx.lineTo(cardX + cardW - r, cardY);
@@ -583,64 +584,45 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
       ctx.stroke();
 
       // Top Glass Highlight
-      const grad = ctx.createLinearGradient(cardX, cardY, cardX, cardY + 26 * scale);
-      grad.addColorStop(0, 'rgba(255, 255, 255, 0.16)');
+      const grad = ctx.createLinearGradient(cardX, cardY, cardX, cardY + 20 * scale);
+      grad.addColorStop(0, 'rgba(255, 255, 255, 0.12)');
       grad.addColorStop(1, 'rgba(255, 255, 255, 0.0)');
       ctx.fillStyle = grad;
       ctx.fill();
 
       // 2. Draw Distance & Elevation Gain Stats
       ctx.fillStyle = '#ffffff';
-      ctx.font = `bold ${16 * scale}px "Outfit", sans-serif`;
-      ctx.fillText(`${curDistKm} km`, cardX + 16 * scale, cardY + 26 * scale);
+      ctx.font = `bold ${15 * scale}px "Outfit", sans-serif`;
+      ctx.fillText(`${curDistKm} km`, cardX + 14 * scale, cardY + 22 * scale);
 
       ctx.fillStyle = '#94a3b8';
-      ctx.font = `${11 * scale}px sans-serif`;
-      ctx.fillText(`/ ${totalDistanceKm} km`, cardX + 85 * scale, cardY + 26 * scale);
+      ctx.font = `${10 * scale}px sans-serif`;
+      ctx.fillText(`/ ${totalDistanceKm} km`, cardX + 75 * scale, cardY + 22 * scale);
 
       // Altitude & D+
       if (isOutro) {
         ctx.fillStyle = '#f59e0b';
-        ctx.font = `bold ${12 * scale}px sans-serif`;
-        ctx.fillText(`🏆 TRAGUARDO FINALE`, cardX + cardW - 160 * scale, cardY + 26 * scale);
+        ctx.font = `bold ${11 * scale}px sans-serif`;
+        ctx.fillText(`🏆 TRAGUARDO`, cardX + cardW - 100 * scale, cardY + 22 * scale);
       } else {
         ctx.fillStyle = '#14b8a6';
-        ctx.font = `bold ${15 * scale}px "JetBrains Mono", monospace`;
-        ctx.fillText(`${curEle} m`, cardX + cardW - 85 * scale, cardY + 26 * scale);
+        ctx.font = `bold ${14 * scale}px "JetBrains Mono", monospace`;
+        ctx.fillText(`${curEle} m`, cardX + cardW - 65 * scale, cardY + 22 * scale);
       }
 
       ctx.fillStyle = '#f59e0b';
-      ctx.font = `${11 * scale}px sans-serif`;
-      ctx.fillText(`+${curGain}m D+`, cardX + 16 * scale, cardY + 44 * scale);
+      ctx.font = `${10 * scale}px sans-serif`;
+      ctx.fillText(`+${curGain}m D+`, cardX + 14 * scale, cardY + 38 * scale);
 
-      // 3. Draw Elevation Profile Curve
-      const chartX = cardX + 16 * scale;
-      const chartY = cardY + 54 * scale;
-      const chartW = cardW - 32 * scale;
-      const chartH = 65 * scale;
+      // 3. Draw Progressive Elevation Profile Curve (Revealed stroke by stroke)
+      const chartX = cardX + 14 * scale;
+      const chartY = cardY + 46 * scale;
+      const chartW = cardW - 28 * scale;
+      const chartH = 50 * scale;
 
       const spanE = Math.max(30, maxElevation - minElevation);
 
-      ctx.beginPath();
-      ctx.moveTo(chartX, chartY + chartH);
-
-      points.forEach((p, idx) => {
-        const px = chartX + (p.cumDistance / totalDistanceM) * chartW;
-        const py = chartY + chartH - ((p.ele - minElevation) / spanE) * chartH;
-        if (idx === 0) ctx.lineTo(px, py);
-        else ctx.lineTo(px, py);
-      });
-
-      ctx.lineTo(chartX + chartW, chartY + chartH);
-      ctx.closePath();
-
-      const areaGrad = ctx.createLinearGradient(chartX, chartY, chartX, chartY + chartH);
-      areaGrad.addColorStop(0, 'rgba(20, 184, 166, 0.45)');
-      areaGrad.addColorStop(1, 'rgba(20, 184, 166, 0.05)');
-      ctx.fillStyle = areaGrad;
-      ctx.fill();
-
-      // Stroke Line
+      // A. Upcoming Ghost Trail Line
       ctx.beginPath();
       points.forEach((p, idx) => {
         const px = chartX + (p.cumDistance / totalDistanceM) * chartW;
@@ -648,20 +630,53 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
         if (idx === 0) ctx.moveTo(px, py);
         else ctx.lineTo(px, py);
       });
-      ctx.strokeStyle = '#14b8a6';
-      ctx.lineWidth = 1.8 * scale;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+      ctx.lineWidth = 1.0 * scale;
       ctx.stroke();
 
-      // Glowing Current Position Marker Dot on Chart
-      const markerDotX = chartX + tp * chartW;
-      const markerDotY = chartY + chartH - ((curEle - minElevation) / spanE) * chartH;
+      // B. Progressive Active Filled Area (0 to Current Progress)
+      const activeMarkerX = chartX + tp * chartW;
+      const activeMarkerY = chartY + chartH - ((curEle - minElevation) / spanE) * chartH;
 
       ctx.beginPath();
-      ctx.arc(markerDotX, markerDotY, 4.5 * scale, 0, Math.PI * 2);
+      ctx.moveTo(chartX, chartY + chartH);
+      for (let i = 0; i <= ptIndex; i++) {
+        const p = points[i];
+        const px = chartX + (p.cumDistance / totalDistanceM) * chartW;
+        const py = chartY + chartH - ((p.ele - minElevation) / spanE) * chartH;
+        ctx.lineTo(px, py);
+      }
+      ctx.lineTo(activeMarkerX, activeMarkerY);
+      ctx.lineTo(activeMarkerX, chartY + chartH);
+      ctx.closePath();
+
+      const areaGrad = ctx.createLinearGradient(chartX, chartY, chartX, chartY + chartH);
+      areaGrad.addColorStop(0, 'rgba(20, 184, 166, 0.35)');
+      areaGrad.addColorStop(1, 'rgba(20, 184, 166, 0.02)');
+      ctx.fillStyle = areaGrad;
+      ctx.fill();
+
+      // C. Progressive Active Stroke Line
+      ctx.beginPath();
+      for (let i = 0; i <= ptIndex; i++) {
+        const p = points[i];
+        const px = chartX + (p.cumDistance / totalDistanceM) * chartW;
+        const py = chartY + chartH - ((p.ele - minElevation) / spanE) * chartH;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.lineTo(activeMarkerX, activeMarkerY);
+      ctx.strokeStyle = '#14b8a6';
+      ctx.lineWidth = 1.5 * scale;
+      ctx.stroke();
+
+      // D. Glowing Leading Dot
+      ctx.beginPath();
+      ctx.arc(activeMarkerX, activeMarkerY, 3.5 * scale, 0, Math.PI * 2);
       ctx.fillStyle = '#ffffff';
       ctx.fill();
       ctx.strokeStyle = '#14b8a6';
-      ctx.lineWidth = 2 * scale;
+      ctx.lineWidth = 1.5 * scale;
       ctx.stroke();
 
       ctx.restore();
@@ -1271,7 +1286,7 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
           )}
         </div>
 
-        {/* Live Liquid Glass Telemetry HUD Card Overlay */}
+        {/* Minimal & Light Progressive Telemetry HUD Card Overlay */}
         {showHud && sceneReady && !isBuilding && points.length > 1 && (
           <div
             className={`absolute z-20 pointer-events-none transition-all duration-300 ${
@@ -1284,20 +1299,20 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
                 : 'top-14 right-4'
             }`}
           >
-            <div className="w-80 backdrop-blur-2xl bg-black/50 border border-white/20 rounded-2xl shadow-2xl p-3.5 space-y-2 pointer-events-auto relative overflow-hidden">
-              {/* Subtle Glass Specular Reflection Highlight */}
-              <div className="absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-white/10 to-transparent pointer-events-none rounded-t-2xl" />
+            <div className="w-72 backdrop-blur-xl bg-black/45 border border-white/15 rounded-2xl shadow-2xl p-3 space-y-1.5 pointer-events-auto relative overflow-hidden">
+              {/* Subtle Glass Specular Highlight */}
+              <div className="absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-white/10 to-transparent pointer-events-none rounded-t-2xl" />
 
-              {/* Row 1: Realtime Live Metrics (No Percentage) */}
+              {/* Row 1: Realtime Live Metrics (Clean & Minimal) */}
               <div className="flex items-center justify-between">
                 <div>
                   <div className="flex items-baseline gap-1">
-                    <span className="text-lg font-extrabold text-white font-mono tracking-tight">
+                    <span className="text-base font-extrabold text-white font-mono tracking-tight">
                       {currentTelemetry.distKm}
                     </span>
-                    <span className="text-[11px] text-neutral-400 font-medium">/ {totalDistanceKm} km</span>
+                    <span className="text-[10px] text-neutral-400 font-medium">/ {totalDistanceKm} km</span>
                   </div>
-                  <p className="text-[10px] text-teal-300 font-semibold flex items-center gap-1">
+                  <p className="text-[10px] text-amber-300 font-medium flex items-center gap-1">
                     <TrendingUp className="w-3 h-3 text-amber-400" />
                     +{currentTelemetry.gainM}m D+
                   </p>
@@ -1306,49 +1321,65 @@ export function VideoStudio({ trackData, config, onGpxUpload }) {
                 <div className="text-right">
                   {timeProgress.isOutro ? (
                     <div className="flex items-center gap-1 text-amber-300 font-bold text-xs">
-                      <Award className="w-4 h-4 text-amber-400" />
-                      <span>Arrivo Finale</span>
+                      <Award className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Arrivo</span>
                     </div>
                   ) : (
-                    <span className="text-base font-extrabold text-teal-300 font-mono">
+                    <span className="text-sm font-bold text-teal-300 font-mono">
                       {currentTelemetry.eleM} m
                     </span>
                   )}
                 </div>
               </div>
 
-              {/* Row 2: Dynamic Elevation Profile Chart with Live Glowing Progress Dot */}
-              <div className="relative h-14 w-full bg-black/40 rounded-xl p-1 border border-white/5 overflow-hidden">
-                <svg className="w-full h-full" viewBox="0 0 100 40" preserveAspectRatio="none">
+              {/* Row 2: Progressive Dynamic Elevation Profile Chart (Drawn stroke-by-stroke) */}
+              <div className="relative h-10 w-full overflow-hidden pt-1">
+                <svg className="w-full h-full" viewBox="0 0 100 36" preserveAspectRatio="none">
                   <defs>
-                    <linearGradient id="hudAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#14b8a6" stopOpacity="0.45" />
-                      <stop offset="100%" stopColor="#14b8a6" stopOpacity="0.05" />
+                    <linearGradient id="hudActiveAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#14b8a6" stopOpacity="0.4" />
+                      <stop offset="100%" stopColor="#14b8a6" stopOpacity="0.02" />
                     </linearGradient>
                   </defs>
 
-                  {/* Shaded Area Under Elevation Curve */}
                   {(() => {
                     const spanE = Math.max(30, maxElevation - minElevation);
 
-                    const pathPoints = points.map((p) => {
+                    // A. Full Ghost Trail Line (Subtle Upcoming Outline)
+                    const fullPoints = points.map((p) => {
                       const x = (p.cumDistance / totalDistanceM) * 100;
-                      const y = 36 - ((p.ele - minElevation) / spanE) * 30;
+                      const y = 32 - ((p.ele - minElevation) / spanE) * 26;
                       return `${x.toFixed(1)},${y.toFixed(1)}`;
                     });
+                    const ghostLineD = `M ${fullPoints.join(' L ')}`;
 
-                    const areaD = `M 0,38 L ${pathPoints.join(' L ')} L 100,38 Z`;
-                    const lineD = `M ${pathPoints.join(' L ')}`;
-
+                    // B. Progressive Active Section (0 to Current Position)
+                    const ptIdx = currentTelemetry.ptIndex;
                     const curX = timeProgress.trailProgress * 100;
-                    const curY = 36 - ((currentTelemetry.eleM - minElevation) / spanE) * 30;
+                    const curY = 32 - ((currentTelemetry.eleM - minElevation) / spanE) * 26;
+
+                    const activePoints = [];
+                    for (let i = 0; i <= ptIdx; i++) {
+                      const p = points[i];
+                      const px = (p.cumDistance / totalDistanceM) * 100;
+                      const py = 32 - ((p.ele - minElevation) / spanE) * 26;
+                      activePoints.push(`${px.toFixed(1)},${py.toFixed(1)}`);
+                    }
+                    activePoints.push(`${curX.toFixed(1)},${curY.toFixed(1)}`);
+
+                    const activeAreaD = `M 0,34 L ${activePoints.join(' L ')} L ${curX.toFixed(1)},34 Z`;
+                    const activeLineD = `M ${activePoints.join(' L ')}`;
 
                     return (
                       <>
-                        <path d={areaD} fill="url(#hudAreaGrad)" />
-                        <path d={lineD} fill="none" stroke="#14b8a6" strokeWidth="1.5" />
-                        {/* Live Dot */}
-                        <circle cx={curX} cy={curY} r="2.5" fill="#ffffff" stroke="#14b8a6" strokeWidth="1.2" />
+                        {/* Upcoming Ghost Track */}
+                        <path d={ghostLineD} fill="none" stroke="rgba(255, 255, 255, 0.12)" strokeWidth="1.0" />
+                        {/* Active Filled Area */}
+                        <path d={activeAreaD} fill="url(#hudActiveAreaGrad)" />
+                        {/* Active Line */}
+                        <path d={activeLineD} fill="none" stroke="#14b8a6" strokeWidth="1.4" />
+                        {/* Current Glowing Head Dot */}
+                        <circle cx={curX} cy={curY} r="2.2" fill="#ffffff" stroke="#14b8a6" strokeWidth="1.2" />
                       </>
                     );
                   })()}
