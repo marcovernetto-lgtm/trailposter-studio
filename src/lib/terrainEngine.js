@@ -88,14 +88,14 @@ async function asyncPool(poolLimit, array, iteratorFn) {
 
 /**
  * Build a complete Three.js scene with ultra-crisp 4K UHD 3D terrain mesh,
- * high-resolution satellite imagery (Zoom 16-17), and a slim, elegant 3D track.
+ * guaranteed 100% complete map coverage of the whole GPX track, and a slim elegant track.
  */
 export async function buildTerrainScene(trackPoints, options = {}, onProgress = () => {}) {
   const config = {
     heightExaggeration: 1.6,
     trackColor: '#14b8a6',
     trackWidth: 0.7, // Slim, high-definition track
-    padding: 0.22, // Tighter padding to concentrate max pixels on track & peaks
+    padding: 0.20, // 20% framing padding
     quality: 'ultra', // 'ultra' | 'high' | 'standard'
     ...options,
   };
@@ -104,7 +104,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     throw new Error('Traccia GPX non valida o con troppi pochi punti.');
   }
 
-  onProgress(5, 'Calcolo perimetro e risoluzione satellitare Ultra 4K...');
+  onProgress(5, 'Calcolo perimetro completo e ottimizzazione risoluzione...');
 
   // 1. Calculate Track Mercator Bounds
   let minMx = Infinity, maxMx = -Infinity;
@@ -129,7 +129,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   const trackHeightM = Math.max(300, maxMy - minMy);
   const maxSpanM = Math.max(trackWidthM, trackHeightM);
 
-  // Add padding around the track
+  // Add framing padding around the track
   const padM = maxSpanM * config.padding;
   const boundMinMx = minMx - padM;
   const boundMaxMx = maxMx + padM;
@@ -138,47 +138,63 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
   const totalSpanM = Math.max(boundMaxMx - boundMinMx, boundMaxMy - boundMinMy);
 
-  // 2. High-Resolution Zoom Strategy:
-  // Ultra 4K: Zoom 17 (~1.1m/px) for < 7km, Zoom 16 (~2.3m/px) for < 18km, Zoom 15 (~4.7m/px) for < 45km
-  let zoom = 15;
+  // 2. Intelligent Dynamic Zoom Selection (Guaranteed 100% Coverage Without Truncation)
+  let maxAxisTiles = 18;
+  let maxTotalTiles = 220;
+
   if (config.quality === 'ultra') {
-    if (totalSpanM < 7000) zoom = 17;        // < 7km -> Zoom 17 (~1.1m/pixel Razor Sharp!)
-    else if (totalSpanM < 18000) zoom = 16;   // < 18km -> Zoom 16 (~2.3m/pixel Ultra HD)
-    else if (totalSpanM < 45000) zoom = 15;   // < 45km -> Zoom 15 (~4.7m/pixel Super HD)
-    else if (totalSpanM < 100000) zoom = 14;  // < 100km -> Zoom 14 (~9.5m/pixel)
-    else zoom = 13;
+    maxAxisTiles = 20;
+    maxTotalTiles = 260;
   } else if (config.quality === 'high') {
-    if (totalSpanM < 12000) zoom = 16;
-    else if (totalSpanM < 30000) zoom = 15;
-    else if (totalSpanM < 75000) zoom = 14;
-    else zoom = 13;
+    maxAxisTiles = 16;
+    maxTotalTiles = 180;
   } else {
-    // Standard
-    if (totalSpanM < 20000) zoom = 15;
-    else if (totalSpanM < 50000) zoom = 14;
-    else zoom = 13;
+    maxAxisTiles = 12;
+    maxTotalTiles = 110;
+  }
+
+  let zoom = 14;
+  let startTx = 0, endTx = 0, startTy = 0, endTy = 0;
+  let numTilesX = 0, numTilesY = 0;
+
+  // Search from highest zoom (Zoom 18) down to find the maximum possible resolution
+  // that encloses 100% of the track without ever truncating
+  for (let testZ = 18; testZ >= 9; testZ--) {
+    const minT = mercatorToTile(boundMinMx, boundMaxMy, testZ); // North-West
+    const maxT = mercatorToTile(boundMaxMx, boundMinMy, testZ); // South-East
+    const nX = maxT.tx - minT.tx + 1;
+    const nY = maxT.ty - minT.ty + 1;
+    const totalT = nX * nY;
+
+    if (nX <= maxAxisTiles && nY <= maxAxisTiles && totalT <= maxTotalTiles) {
+      zoom = testZ;
+      startTx = minT.tx;
+      endTx = maxT.tx;
+      startTy = minT.ty;
+      endTy = maxT.ty;
+      numTilesX = nX;
+      numTilesY = nY;
+      break;
+    }
+  }
+
+  // Fallback if needed
+  if (numTilesX === 0) {
+    zoom = 12;
+    const minT = mercatorToTile(boundMinMx, boundMaxMy, zoom);
+    const maxT = mercatorToTile(boundMaxMx, boundMinMy, zoom);
+    startTx = minT.tx;
+    endTx = maxT.tx;
+    startTy = minT.ty;
+    endTy = maxT.ty;
+    numTilesX = endTx - startTx + 1;
+    numTilesY = endTy - startTy + 1;
   }
 
   const tileSizeM = C_EARTH / Math.pow(2, zoom);
-
-  // Determine tile grid range
-  const minTile = mercatorToTile(boundMinMx, boundMaxMy, zoom); // North-West
-  const maxTile = mercatorToTile(boundMaxMx, boundMinMy, zoom); // South-East
-
-  let startTx = minTile.tx;
-  let endTx = maxTile.tx;
-  let startTy = minTile.ty;
-  let endTy = maxTile.ty;
-
-  // Max 14x14 tiles grid (up to ~3500×3500px master texture)
-  if (endTx - startTx > 13) endTx = startTx + 13;
-  if (endTy - startTy > 13) endTy = startTy + 13;
-
-  const numTilesX = endTx - startTx + 1;
-  const numTilesY = endTy - startTy + 1;
   const totalTiles = numTilesX * numTilesY;
 
-  // Exact geographic extent of all loaded tiles
+  // Exact geographic extent of all loaded tiles (Guaranteed to cover all points)
   const gridMinMx = startTx * tileSizeM - C_EARTH / 2;
   const gridMaxMx = (endTx + 1) * tileSizeM - C_EARTH / 2;
   const gridMaxMy = C_EARTH / 2 - startTy * tileSizeM; // North
@@ -187,7 +203,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   const gridSpanX = gridMaxMx - gridMinMx;
   const gridSpanY = gridMaxMy - gridMinMy;
 
-  onProgress(15, `Scaricamento ${totalTiles} immagini satellitari Ultra HD a Zoom ${zoom}...`);
+  onProgress(15, `Scaricamento mappa completa (${numTilesX}×${numTilesY} = ${totalTiles} tile) a Zoom ${zoom}...`);
 
   // 3. Load Map Tiles and DEM Elevation Tiles in Parallel Pool
   const mapCanvas = document.createElement('canvas');
@@ -211,7 +227,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   // DEM zoom level: clamp between 12 and 15
   const demZoom = Math.min(15, Math.max(12, zoom));
 
-  await asyncPool(16, tileItems, async ({ tx, ty, col, row }) => {
+  await asyncPool(18, tileItems, async ({ tx, ty, col, row }) => {
     const px = col * 256;
     const py = row * 256;
 
@@ -225,9 +241,8 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
       mapCtx.fillRect(px, py, 256, 256);
     }
 
-    // B. Load AWS Terrarium DEM Tile (reprojected to current tile center if zoom differs)
+    // B. Load AWS Terrarium DEM Tile
     try {
-      // Tile center in Mercator
       const tileCenterMx = (tx + 0.5) * tileSizeM - C_EARTH / 2;
       const tileCenterMy = C_EARTH / 2 - (ty + 0.5) * tileSizeM;
       const demTile = mercatorToTile(tileCenterMx, tileCenterMy, demZoom);
