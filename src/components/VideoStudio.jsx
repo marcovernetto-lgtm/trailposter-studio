@@ -771,17 +771,15 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
         cardY + 23 * baseScale
       );
 
-      // Altitude & D+ (Right aligned)
+      // Total Positive Elevation Gain D+ (Right aligned, Big & Prominent)
       ctx.textAlign = 'right';
-      if (isOutro) {
-        ctx.fillStyle = '#f59e0b';
-        ctx.font = `bold ${11 * baseScale}px "Outfit", system-ui, -apple-system, sans-serif`;
-        ctx.fillText(`TRAGUARDO`, cardX + cardW - 14 * baseScale, cardY + 23 * baseScale);
-      } else {
-        ctx.fillStyle = '#facc15';
-        ctx.font = `bold ${15 * baseScale}px "JetBrains Mono", monospace`;
-        ctx.fillText(`${curEle} m`, cardX + cardW - 14 * baseScale, cardY + 23 * baseScale);
-      }
+      ctx.fillStyle = '#facc15';
+      ctx.font = `bold ${16 * baseScale}px "JetBrains Mono", monospace`;
+      ctx.fillText(`+${totalElevationGain} m`, cardX + cardW - 14 * baseScale, cardY + 23 * baseScale);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = `bold ${9 * baseScale}px "Outfit", system-ui, -apple-system, sans-serif`;
+      ctx.fillText(`D+ TOTALE`, cardX + cardW - 14 * baseScale, cardY + 38 * baseScale);
 
       ctx.textAlign = 'left';
       ctx.fillStyle = '#f59e0b';
@@ -1511,22 +1509,8 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
 
       {/* Central 3D Interactive Viewport (Right - 8 Cols on LG) */}
       <div className="lg:col-span-8 flex flex-col items-center justify-center glass-panel rounded-2xl min-h-[calc(100vh-100px)] border border-white/10 relative overflow-hidden bg-[#0c1017] p-2">
-        {/* Top Floating Status Bar */}
-        <div className="absolute top-4 left-4 right-4 z-10 flex items-center justify-between pointer-events-none">
-          <div className="glass-panel-subtle px-3 py-1 rounded-full border border-white/10 pointer-events-auto flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
-            <span className="text-xs font-mono tracking-wider text-neutral-200 uppercase">
-              {timeProgress.isOutro
-                ? 'Outro Finale Panoramico (7s)'
-                : directorType === 'keyframe'
-                ? `Regia Keyframe (${keyframes.length} scene)`
-                : `Regia • ${CAMERA_MODES[cameraMode]?.name}`}
-            </span>
-            <span className="text-[10px] bg-white/10 text-teal-300 font-mono font-bold px-1.5 py-0.5 rounded">
-              {aspectRatio}
-            </span>
-          </div>
-
+        {/* Top Floating Action Controls */}
+        <div className="absolute top-4 right-4 z-10 flex items-center gap-2 pointer-events-none">
           {sceneReady && (
             <div className="flex items-center gap-2 pointer-events-auto">
               <button
@@ -1660,32 +1644,28 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
                       </span>
                       <span className="text-[10px] text-neutral-400 font-medium">/ {totalDistanceKm} km</span>
                     </div>
-                    <p className="text-[10px] text-amber-300 font-medium flex items-center gap-1">
+                    <p className="text-[10px] text-amber-400/90 font-medium flex items-center gap-1">
                       <TrendingUp className="w-3 h-3 text-amber-400" />
                       +{currentTelemetry.gainM}m D+
                     </p>
                   </div>
 
                   <div className="text-right">
-                    {timeProgress.isOutro ? (
-                      <div className="flex items-center gap-1 text-amber-300 font-bold text-xs">
-                        <Award className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Arrivo</span>
-                      </div>
-                    ) : (
-                      <span
-                        className={`${
-                          aspectRatio === '9:16' ? 'text-xs' : 'text-sm'
-                        } font-bold text-amber-300 font-mono`}
-                      >
-                        {currentTelemetry.eleM} m
-                      </span>
-                    )}
+                    <span
+                      className={`${
+                        aspectRatio === '9:16' ? 'text-sm' : 'text-base'
+                      } font-extrabold text-amber-300 font-mono tracking-tight`}
+                    >
+                      +{totalElevationGain} m
+                    </span>
+                    <p className="text-[9px] text-neutral-400 font-bold uppercase tracking-wider">
+                      D+ Totale
+                    </p>
                   </div>
                 </div>
 
                 {/* Row 2: Progressive Dynamic Elevation Profile Chart */}
-                <div className="relative h-10 w-full overflow-hidden pt-1">
+                <div className="relative h-10 w-full pt-1">
                   <svg className="w-full h-full" viewBox="0 0 100 36" preserveAspectRatio="none">
                     <defs>
                       <linearGradient id="hudActiveAreaGrad" x1="0" y1="0" x2="0" y2="1">
@@ -1727,11 +1707,30 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
                           <path d={ghostLineD} fill="none" stroke="rgba(255, 255, 255, 0.12)" strokeWidth="1.0" />
                           <path d={activeAreaD} fill="url(#hudActiveAreaGrad)" />
                           <path d={activeLineD} fill="none" stroke={trackColor || '#ff5500'} strokeWidth="1.6" />
-                          <circle cx={curX} cy={curY} r="2.4" fill="#ffffff" stroke={trackColor || '#ff5500'} strokeWidth="1.4" />
                         </>
                       );
                     })()}
                   </svg>
+
+                  {/* Pixel-perfect circular indicator dot (unaffected by SVG aspect ratio) */}
+                  {(() => {
+                    const spanE = Math.max(30, maxElevation - minElevation);
+                    const curX = timeProgress.trailProgress * 100;
+                    const curY = 32 - ((currentTelemetry.eleM - minElevation) / spanE) * 26;
+                    const topPct = (curY / 36) * 100;
+
+                    return (
+                      <div
+                        className="absolute w-3.5 h-3.5 -ml-[7px] -mt-[7px] rounded-full bg-white border-2 shadow-lg pointer-events-none transition-all duration-75"
+                        style={{
+                          left: `${curX}%`,
+                          top: `${topPct}%`,
+                          borderColor: trackColor || '#ff5500',
+                          boxShadow: `0 0 8px ${trackColor || '#ff5500'}`,
+                        }}
+                      />
+                    );
+                  })()}
                 </div>
               </div>
             </div>
