@@ -77,10 +77,6 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
   const [showHud, setShowHud] = useState(true);
   const [hudPosition, setHudPosition] = useState('top_left'); // 'top_left' | 'top_right' | 'bottom_left' | 'bottom_right'
 
-  // Sfocatura Territorio Distante (Profondità orizzonte perimetrale)
-  const [enableDistantBlur, setEnableDistantBlur] = useState(true); // Default: Attiva
-  const [distantBlurStrength, setDistantBlurStrength] = useState('medium'); // 'soft' | 'medium' | 'heavy'
-
   // Camera & Director Mode
   const [directorType, setDirectorType] = useState('auto'); // 'auto' | 'keyframe'
   const [cameraMode, setCameraMode] = useState('drone');
@@ -336,13 +332,6 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
       setIsBuilding(false);
     }
   }, [points, heightExaggeration, trackColor, trackWidth, waypoints, aspectRatio]);
-
-  // Sync distant blur on terrain scene in real-time
-  useEffect(() => {
-    if (sceneDataRef.current?.setDistantBlur) {
-      sceneDataRef.current.setDistantBlur(enableDistantBlur, distantBlurStrength);
-    }
-  }, [enableDistantBlur, distantBlurStrength]);
 
   // Initial load & trigger build on point/elevation/waypoints changes
   useEffect(() => {
@@ -1444,62 +1433,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
           )}
         </div>
 
-        {/* Card 6: Sfocatura Territorio Distante (Profondità & Orizzonte non 4K) */}
-        <div className="glass-card p-3 rounded-2xl border border-white/10 space-y-2 bg-[#181a20]/95 shadow-md">
-          <div className="flex items-center justify-between border-b border-white/5 pb-1.5">
-            <div className="flex items-center gap-2">
-              <Focus className="w-4 h-4 text-teal-400" />
-              <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-200">
-                Sfocatura Parti Lontane
-              </h3>
-            </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={enableDistantBlur}
-                onChange={(e) => setEnableDistantBlur(e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-teal-600"></div>
-            </label>
-          </div>
-
-          {enableDistantBlur && (
-            <div className="space-y-1.5 pt-0.5">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-neutral-400">Sfocatura Orizzonte e Quinte</span>
-                <span className="text-teal-300 font-mono font-bold text-[10px] uppercase">
-                  {distantBlurStrength === 'soft'
-                    ? 'Morbida'
-                    : distantBlurStrength === 'heavy'
-                    ? 'Intensa'
-                    : 'Media'}
-                </span>
-              </div>
-              <div className="grid grid-cols-3 gap-1 text-[11px]">
-                {[
-                  { id: 'soft', label: 'Morbida' },
-                  { id: 'medium', label: 'Media' },
-                  { id: 'heavy', label: 'Intensa' },
-                ].map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => setDistantBlurStrength(s.id)}
-                    className={`py-1 rounded-lg border font-semibold transition-all text-center ${
-                      distantBlurStrength === s.id
-                        ? 'border-teal-500 bg-teal-500/20 text-teal-300 font-bold'
-                        : 'border-white/10 bg-white/5 text-neutral-400 hover:text-white'
-                    }`}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Card 7: Generazione & Esportazione MP4 */}
+        {/* Card 6: Generazione & Esportazione MP4 */}
         <div className="glass-card p-3 rounded-2xl border border-teal-500/40 space-y-2 bg-[#181a20]/95 shadow-xl">
           <div className="flex items-center gap-2 border-b border-white/5 pb-1">
             <Sparkles className="w-4 h-4 text-teal-400" />

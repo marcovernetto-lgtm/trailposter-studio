@@ -273,7 +273,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     heightExaggeration: 1.6,
     trackColor: '#ff5500', // Default: High-Contrast Orange
     trackWidth: 1.4, // Wide flat ribbon width
-    padding: 0.20, // 20% framing padding
+    padding: 0.38, // 38% wide framing padding for full 4K mountain ridge coverage
     quality: 'ultra', // 'ultra' | 'high' | 'standard'
     waypoints: [], // Array of waypoints [{ id, name, percent, lat, lon }]
     ...options,
@@ -554,84 +554,6 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   terrainMesh.castShadow = true;
   terrainMesh.renderOrder = 0;
 
-  // 5.b Distant Surrounding Terrain Skirt (Low-Resolution, Softly Blurred Distant Horizon)
-  const skirtWidth = worldWidth * 2.8;
-  const skirtHeight = worldHeight * 2.8;
-  const skirtGeom = new THREE.PlaneGeometry(skirtWidth, skirtHeight, 70, 70);
-  skirtGeom.rotateX(-Math.PI / 2);
-
-  const skirtPosAttr = skirtGeom.attributes.position;
-  const halfInnerW = worldWidth * 0.495;
-  const halfInnerH = worldHeight * 0.495;
-
-  for (let i = 0; i < skirtPosAttr.count; i++) {
-    const vx = skirtPosAttr.getX(i);
-    const vz = skirtPosAttr.getZ(i);
-
-    const clampedVx = Math.max(-halfInnerW, Math.min(halfInnerW, vx));
-    const clampedVz = Math.max(-halfInnerH, Math.min(halfInnerH, vz));
-    const edgeY = getGroundYAt(clampedVx, clampedVz);
-
-    const distOutX = Math.max(0, Math.abs(vx) - halfInnerW) / (skirtWidth * 0.5 - halfInnerW);
-    const distOutZ = Math.max(0, Math.abs(vz) - halfInnerH) / (skirtHeight * 0.5 - halfInnerH);
-    const distOut = Math.min(1.0, Math.sqrt(distOutX * distOutX + distOutZ * distOutZ));
-
-    const undulation = Math.sin(vx * 0.012) * Math.cos(vz * 0.012) * 20 * (1.0 - distOut);
-    const skirtY = Math.max(0, edgeY * (1.0 - distOut * 0.85) + undulation);
-    skirtPosAttr.setY(i, skirtY);
-  }
-  skirtGeom.computeVertexNormals();
-
-  const skirtCanvas = document.createElement('canvas');
-  skirtCanvas.width = 512;
-  skirtCanvas.height = 512;
-  const skirtCtx = skirtCanvas.getContext('2d');
-
-  const skirtTexture = new THREE.CanvasTexture(skirtCanvas);
-  skirtTexture.colorSpace = THREE.SRGBColorSpace;
-  skirtTexture.minFilter = THREE.LinearFilter;
-  skirtTexture.magFilter = THREE.LinearFilter;
-
-  const renderSkirtTexture = (blurred = true, blurPx = 8) => {
-    skirtCtx.clearRect(0, 0, 512, 512);
-    if (blurred) {
-      skirtCtx.filter = `blur(${blurPx}px)`;
-    } else {
-      skirtCtx.filter = 'none';
-    }
-    skirtCtx.drawImage(mapCanvas, 0, 0, 512, 512);
-    skirtCtx.filter = 'none';
-
-    // Distant aerial perspective & subtle mountain haze on outer horizon
-    const hazeGrad = skirtCtx.createRadialGradient(256, 256, 120, 256, 256, 260);
-    hazeGrad.addColorStop(0, 'rgba(12, 16, 23, 0.0)');
-    hazeGrad.addColorStop(1, 'rgba(12, 16, 23, 0.70)');
-    skirtCtx.fillStyle = hazeGrad;
-    skirtCtx.fillRect(0, 0, 512, 512);
-
-    skirtTexture.needsUpdate = true;
-  };
-
-  const setDistantBlur = (enabled = true, strength = 'medium') => {
-    const px = strength === 'heavy' ? 14 : strength === 'soft' ? 4 : 8;
-    renderSkirtTexture(enabled, px);
-  };
-
-  const initialStrength = config.distantBlurStrength || 'medium';
-  const initialBlurPx = initialStrength === 'heavy' ? 14 : initialStrength === 'soft' ? 4 : 8;
-  renderSkirtTexture(config.distantBlur !== false, initialBlurPx);
-
-  const skirtMaterial = new THREE.MeshStandardMaterial({
-    map: skirtTexture,
-    roughness: 0.95,
-    metalness: 0.01,
-    flatShading: false,
-  });
-
-  const skirtMesh = new THREE.Mesh(skirtGeom, skirtMaterial);
-  skirtMesh.receiveShadow = true;
-  skirtMesh.renderOrder = -1;
-
   onProgress(88, 'Creazione percorso GPX e cartelli 3D...');
 
   // 6. Project GPX Track to 3D World Space with Exact Ground Conformance
@@ -772,9 +694,8 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   // 9. Construct Three.js Scene & Lighting
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#0c1017');
-  scene.fog = new THREE.FogExp2('#141b27', 0.00035);
+  scene.fog = new THREE.FogExp2('#111722', 0.00022);
 
-  scene.add(skirtMesh);
   scene.add(terrainMesh);
   scene.add(trackMesh);
   scene.add(markerMesh);
@@ -830,9 +751,6 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     geometry.dispose();
     terrainMaterial.dispose();
     texture.dispose();
-    skirtGeom.dispose();
-    skirtMaterial.dispose();
-    skirtTexture.dispose();
     ribbonGeom.dispose();
     trackMaterial.dispose();
     markerGeom.dispose();
@@ -857,7 +775,6 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
       spanKm: totalSpanM / 1000,
     },
     updateProgress,
-    setDistantBlur,
     dispose,
   };
 }
