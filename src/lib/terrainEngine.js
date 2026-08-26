@@ -273,7 +273,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     heightExaggeration: 1.6,
     trackColor: '#ff5500', // Default: High-Contrast Orange
     trackWidth: 1.4, // Wide flat ribbon width
-    padding: 0.38, // 38% wide framing padding for full 4K mountain ridge coverage
+    padding: 0.45, // 45% wide framing padding for full mountain valley coverage in 4K
     quality: 'ultra', // 'ultra' | 'high' | 'standard'
     waypoints: [], // Array of waypoints [{ id, name, percent, lat, lon }]
     ...options,
@@ -368,40 +368,11 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   const gridSpanX = gridMaxMx - gridMinMx;
   const gridSpanY = gridMaxMy - gridMinMy;
 
-  // 2.b Calculate Distant Regional Horizon Bounds (3.0x Area at Low Zoom Z-3)
-  const centerMx = (gridMinMx + gridMaxMx) * 0.5;
-  const centerMy = (gridMinMy + gridMaxMy) * 0.5;
-  const outerSpanX = gridSpanX * 3.0;
-  const outerSpanY = gridSpanY * 3.0;
-  const outerMinMx = centerMx - outerSpanX * 0.5;
-  const outerMaxMx = centerMx + outerSpanX * 0.5;
-  const outerMinMy = centerMy - outerSpanY * 0.5;
-  const outerMaxMy = centerMy + outerSpanY * 0.5;
-
-  const outerZoom = Math.max(7, zoom - 3);
-  const outerMinT = mercatorToTile(outerMinMx, outerMaxMy, outerZoom);
-  const outerMaxT = mercatorToTile(outerMaxMx, outerMinMy, outerZoom);
-  const outerStartTx = outerMinT.tx;
-  const outerEndTx = outerMaxT.tx;
-  const outerStartTy = outerMinT.ty;
-  const outerEndTy = outerMaxT.ty;
-  const outerNumTilesX = outerEndTx - outerStartTx + 1;
-  const outerNumTilesY = outerEndTy - outerStartTy + 1;
-  const outerTileSizeM = C_EARTH / Math.pow(2, outerZoom);
-
-  const outerGridMinMx = outerStartTx * outerTileSizeM - C_EARTH / 2;
-  const outerGridMaxMx = (outerEndTx + 1) * outerTileSizeM - C_EARTH / 2;
-  const outerGridMaxMy = C_EARTH / 2 - outerStartTy * outerTileSizeM;
-  const outerGridMinMy = C_EARTH / 2 - (outerEndTy + 1) * outerTileSizeM;
-  const outerGridSpanX = outerGridMaxMx - outerGridMinMx;
-  const outerGridSpanY = outerGridMaxMy - outerGridMinMy;
-
   const demZoom = Math.min(15, Math.max(12, zoom));
-  const outerDemZoom = Math.min(12, Math.max(8, demZoom - 3));
 
-  onProgress(15, `Scaricamento mappa 4K e orizzonte montuoso (${numTilesX * numTilesY + outerNumTilesX * outerNumTilesY} tile)...`);
+  onProgress(15, `Scaricamento mappa 4K Ultra HD (${numTilesX}×${numTilesY} tile) a Zoom ${zoom}...`);
 
-  // 3. Load 4K Inner Tiles & Outer Horizon Tiles in Parallel Pool
+  // 3. Load 4K Satellite Tiles & DEM Elevation Tiles in Parallel Pool
   const mapCanvas = document.createElement('canvas');
   mapCanvas.width = numTilesX * 256;
   mapCanvas.height = numTilesY * 256;
@@ -409,59 +380,41 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   mapCtx.fillStyle = '#141a22';
   mapCtx.fillRect(0, 0, mapCanvas.width, mapCanvas.height);
 
-  const outerCanvas = document.createElement('canvas');
-  outerCanvas.width = outerNumTilesX * 256;
-  outerCanvas.height = outerNumTilesY * 256;
-  const outerCtx = outerCanvas.getContext('2d');
-  outerCtx.fillStyle = '#141a22';
-  outerCtx.fillRect(0, 0, outerCanvas.width, outerCanvas.height);
-
   const elevations = new Map();
   let loadedCount = 0;
 
-  const innerTileItems = [];
+  const tileItems = [];
   for (let ty = startTy; ty <= endTy; ty++) {
     for (let tx = startTx; tx <= endTx; tx++) {
-      innerTileItems.push({ tx, ty, col: tx - startTx, row: ty - startTy, isOuter: false, z: zoom, dZ: demZoom, tSize: tileSizeM });
+      tileItems.push({ tx, ty, col: tx - startTx, row: ty - startTy });
     }
   }
 
-  const outerTileItems = [];
-  for (let ty = outerStartTy; ty <= outerEndTy; ty++) {
-    for (let tx = outerStartTx; tx <= outerEndTx; tx++) {
-      outerTileItems.push({ tx, ty, col: tx - outerStartTx, row: ty - outerStartTy, isOuter: true, z: outerZoom, dZ: outerDemZoom, tSize: outerTileSizeM });
-    }
-  }
-
-  const allTileTasks = [...innerTileItems, ...outerTileItems];
-  const totalAllTiles = allTileTasks.length;
-
-  await asyncPool(28, allTileTasks, async ({ tx, ty, col, row, isOuter, z, dZ, tSize }) => {
+  await asyncPool(24, tileItems, async ({ tx, ty, col, row }) => {
     const px = col * 256;
     const py = row * 256;
-    const ctx = isOuter ? outerCtx : mapCtx;
 
-    // A. Load Satellite Tile
+    // A. Load Esri Satellite Ultra HD Tile
     try {
-      const url = MAP_STYLES.satellite.getTileUrl(z, tx, ty);
+      const url = MAP_STYLES.satellite.getTileUrl(zoom, tx, ty);
       const img = await loadImage(url);
-      ctx.drawImage(img, px, py, 256, 256);
+      mapCtx.drawImage(img, px, py, 256, 256);
     } catch (e) {
-      ctx.fillStyle = '#1e2836';
-      ctx.fillRect(px, py, 256, 256);
+      mapCtx.fillStyle = '#1e2836';
+      mapCtx.fillRect(px, py, 256, 256);
     }
 
-    // B. Load DEM Elevation Tile
+    // B. Load AWS Terrarium DEM Tile
     try {
-      const tileCenterMx = (tx + 0.5) * tSize - C_EARTH / 2;
-      const tileCenterMy = C_EARTH / 2 - (ty + 0.5) * tSize;
-      const demTile = mercatorToTile(tileCenterMx, tileCenterMy, dZ);
+      const tileCenterMx = (tx + 0.5) * tileSizeM - C_EARTH / 2;
+      const tileCenterMy = C_EARTH / 2 - (ty + 0.5) * tileSizeM;
+      const demTile = mercatorToTile(tileCenterMx, tileCenterMy, demZoom);
 
-      const demKey = `${demTile.tx}/${demTile.ty}_${dZ}`;
+      const demKey = `${demTile.tx}/${demTile.ty}_${demZoom}`;
       let eleArray = elevations.get(demKey);
 
       if (!eleArray) {
-        const demUrl = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${dZ}/${demTile.tx}/${demTile.ty}.png`;
+        const demUrl = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${demZoom}/${demTile.tx}/${demTile.ty}.png`;
         const demImg = await loadImage(demUrl);
         const demCanvas = document.createElement('canvas');
         demCanvas.width = 256;
@@ -485,37 +438,23 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
     loadedCount++;
     onProgress(
-      15 + Math.floor((loadedCount / totalAllTiles) * 55),
-      `Scaricamento texture satellitare e orizzonte (${loadedCount}/${totalAllTiles})...`
+      15 + Math.floor((loadedCount / totalTiles) * 55),
+      `Scaricamento texture satellitare 4K (${loadedCount}/${totalTiles})...`
     );
   });
 
-  onProgress(75, 'Costruzione mesh 3D del rilievo montuoso e orizzonte...');
+  onProgress(75, 'Costruzione mesh 3D ad altissima definizione...');
 
   // 4. Sample Elevation with Bilinear Filtering across DEM
   const getElevationAtMercator = (mx, my) => {
-    let targetDemZ = demZoom;
-    let demTileSizeM = C_EARTH / Math.pow(2, targetDemZ);
-    let px = ((mx + C_EARTH / 2) / C_EARTH) * Math.pow(2, targetDemZ);
-    let py = ((C_EARTH / 2 - my) / C_EARTH) * Math.pow(2, targetDemZ);
-    let tx = Math.floor(px);
-    let ty = Math.floor(py);
+    const demTileSizeM = C_EARTH / Math.pow(2, demZoom);
+    const px = ((mx + C_EARTH / 2) / C_EARTH) * Math.pow(2, demZoom);
+    const py = ((C_EARTH / 2 - my) / C_EARTH) * Math.pow(2, demZoom);
+    const tx = Math.floor(px);
+    const ty = Math.floor(py);
 
-    let demKey = `${tx}/${ty}_${targetDemZ}`;
-    let eleArray = elevations.get(demKey);
-
-    // Fallback to outerDemZoom if not in high-res DEM
-    if (!eleArray && outerDemZoom) {
-      targetDemZ = outerDemZoom;
-      demTileSizeM = C_EARTH / Math.pow(2, targetDemZ);
-      px = ((mx + C_EARTH / 2) / C_EARTH) * Math.pow(2, targetDemZ);
-      py = ((C_EARTH / 2 - my) / C_EARTH) * Math.pow(2, targetDemZ);
-      tx = Math.floor(px);
-      ty = Math.floor(py);
-      demKey = `${tx}/${ty}_${targetDemZ}`;
-      eleArray = elevations.get(demKey);
-    }
-
+    const demKey = `${tx}/${ty}_${demZoom}`;
+    const eleArray = elevations.get(demKey);
     if (!eleArray) return 0;
 
     const exactX = (px - tx) * 255;
@@ -609,68 +548,6 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   terrainMesh.receiveShadow = true;
   terrainMesh.castShadow = true;
   terrainMesh.renderOrder = 0;
-
-  // 5.b Distant Surrounding Regional Horizon Mesh (Low-Res Background Panorama with Real Topography)
-  const outerWorldWidth = worldWidth * (outerGridSpanX / gridSpanX);
-  const outerWorldHeight = worldHeight * (outerGridSpanY / gridSpanY);
-
-  const outerGeom = new THREE.PlaneGeometry(outerWorldWidth, outerWorldHeight, 80, 80);
-  outerGeom.rotateX(-Math.PI / 2);
-
-  const outerPos = outerGeom.attributes.position;
-  for (let i = 0; i < outerPos.count; i++) {
-    const ovx = outerPos.getX(i);
-    const ovz = outerPos.getZ(i);
-
-    const onx = (ovx / outerWorldWidth) + 0.5;
-    const ony = (ovz / outerWorldHeight) + 0.5;
-    const omx = outerGridMinMx + onx * outerGridSpanX;
-    const omy = outerGridMaxMy - ony * outerGridSpanY;
-
-    const rawEle = getElevationAtMercator(omx, omy);
-    const clampedEle = Math.max(lowestEle, Math.min(8848, rawEle));
-    const gy = (clampedEle - lowestEle) * scale * config.heightExaggeration;
-    outerPos.setY(i, gy);
-  }
-  outerGeom.computeVertexNormals();
-
-  // Low-resolution softly filtered satellite texture with atmospheric horizon haze
-  const processedOuterCanvas = document.createElement('canvas');
-  processedOuterCanvas.width = 1024;
-  processedOuterCanvas.height = 1024;
-  const procOuterCtx = processedOuterCanvas.getContext('2d');
-
-  procOuterCtx.filter = 'blur(2.5px)';
-  procOuterCtx.drawImage(outerCanvas, 0, 0, 1024, 1024);
-  procOuterCtx.filter = 'none';
-
-  // Atmospheric haze on outer perimeter
-  const hazeGrad = procOuterCtx.createRadialGradient(512, 512, 280, 512, 512, 512);
-  hazeGrad.addColorStop(0, 'rgba(12, 16, 23, 0.0)');
-  hazeGrad.addColorStop(1, 'rgba(12, 16, 23, 0.70)');
-  procOuterCtx.fillStyle = hazeGrad;
-  procOuterCtx.fillRect(0, 0, 1024, 1024);
-
-  const outerTexture = new THREE.CanvasTexture(processedOuterCanvas);
-  outerTexture.colorSpace = THREE.SRGBColorSpace;
-  outerTexture.generateMipmaps = true;
-  outerTexture.minFilter = THREE.LinearMipmapLinearFilter;
-  outerTexture.magFilter = THREE.LinearFilter;
-
-  const outerMaterial = new THREE.MeshStandardMaterial({
-    map: outerTexture,
-    roughness: 0.95,
-    metalness: 0.01,
-    flatShading: false,
-  });
-
-  const outerTerrainMesh = new THREE.Mesh(outerGeom, outerMaterial);
-  // Center outerTerrainMesh relative to the high-res 4K terrain
-  const outerShiftX = ((outerGridMinMx + outerGridSpanX * 0.5 - gridMinMx) / gridSpanX - 0.5) * worldWidth;
-  const outerShiftZ = ((gridMaxMy - (outerGridMaxMy - outerGridSpanY * 0.5)) / gridSpanY - 0.5) * worldHeight;
-  outerTerrainMesh.position.set(outerShiftX, -0.3, outerShiftZ);
-  outerTerrainMesh.receiveShadow = true;
-  outerTerrainMesh.renderOrder = -1;
 
   onProgress(88, 'Creazione percorso GPX e cartelli 3D...');
 
@@ -812,9 +689,8 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   // 9. Construct Three.js Scene & Lighting
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#0c1017');
-  scene.fog = new THREE.FogExp2('#111722', 0.00018);
+  scene.fog = new THREE.FogExp2('#111722', 0.00022);
 
-  scene.add(outerTerrainMesh);
   scene.add(terrainMesh);
   scene.add(trackMesh);
   scene.add(markerMesh);
@@ -827,11 +703,11 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   sunLight.shadow.mapSize.width = 2048;
   sunLight.shadow.mapSize.height = 2048;
   sunLight.shadow.camera.near = 10;
-  sunLight.shadow.camera.far = 8000;
-  sunLight.shadow.camera.left = -outerWorldWidth * 0.6;
-  sunLight.shadow.camera.right = outerWorldWidth * 0.6;
-  sunLight.shadow.camera.top = outerWorldHeight * 0.6;
-  sunLight.shadow.camera.bottom = -outerWorldHeight * 0.6;
+  sunLight.shadow.camera.far = 4500;
+  sunLight.shadow.camera.left = -worldWidth;
+  sunLight.shadow.camera.right = worldWidth;
+  sunLight.shadow.camera.top = worldHeight;
+  sunLight.shadow.camera.bottom = -worldHeight;
   scene.add(sunLight);
 
   // Ambient & Sky Dome Light
@@ -842,7 +718,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   scene.add(hemiLight);
 
   // 10. Camera Setup
-  const camera = new THREE.PerspectiveCamera(45, 16 / 9, 1, 15000);
+  const camera = new THREE.PerspectiveCamera(45, 16 / 9, 1, 9000);
   camera.position.set(0, worldHeight * 0.6, worldHeight * 0.7);
   camera.lookAt(0, 0, 0);
 
@@ -870,9 +746,6 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     geometry.dispose();
     terrainMaterial.dispose();
     texture.dispose();
-    outerGeom.dispose();
-    outerMaterial.dispose();
-    outerTexture.dispose();
     ribbonGeom.dispose();
     trackMaterial.dispose();
     markerGeom.dispose();
