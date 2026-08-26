@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { ZoomIn, ZoomOut, RotateCcw, Maximize2, Move } from 'lucide-react';
 import { getPointAtPercent, latLonToMercator } from '../lib/gpxParser';
 import { MapLayer } from './MapLayer';
 import { fetchVectorFeatures } from '../lib/overpassVector';
@@ -12,8 +13,149 @@ export function PosterCanvas({ trackData, config, canvasRef }) {
   const [contourProgress, setContourProgress] = useState(0);
   const [contourLoading, setContourLoading] = useState(false);
 
+  // Zoom & Pan state for inspecting high-res poster details
+  const [zoom, setZoom] = useState(1.0);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const viewerContainerRef = useRef(null);
+  const dragRef = useRef(null);
+  const touchPinchRef = useRef(null);
+
   // Track identity to detect when a new GPX file is loaded
   const lastTrackRef = useRef(null);
+
+  // Reset zoom & pan when a new GPX or orientation is loaded
+  useEffect(() => {
+    setZoom(1.0);
+    setPan({ x: 0, y: 0 });
+  }, [trackData, config.orientation]);
+
+  // Non-passive wheel event listener for ultra-smooth zoom centered on cursor
+  useEffect(() => {
+    const el = viewerContainerRef.current;
+    if (!el) return;
+
+    const onWheelHandler = (e) => {
+      e.preventDefault();
+      const zoomFactor = e.deltaY < 0 ? 1.14 : 0.88;
+      setZoom((prevZoom) => {
+        const nextZoom = Math.max(0.6, Math.min(5.0, +(prevZoom * zoomFactor).toFixed(3)));
+        const rect = el.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left - rect.width / 2;
+        const mouseY = e.clientY - rect.top - rect.height / 2;
+        const scaleChange = nextZoom / prevZoom;
+        setPan((prevPan) => ({
+          x: mouseX - (mouseX - prevPan.x) * scaleChange,
+          y: mouseY - (mouseY - prevPan.y) * scaleChange,
+        }));
+        return nextZoom;
+      });
+    };
+
+    el.addEventListener('wheel', onWheelHandler, { passive: false });
+    return () => el.removeEventListener('wheel', onWheelHandler);
+  }, []);
+
+  // Mouse drag handlers
+  const handleMouseDown = (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('button') || e.target.closest('.no-pan')) return;
+
+    setIsDragging(true);
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      initialPanX: pan.x,
+      initialPanY: pan.y,
+    };
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isDragging || !dragRef.current) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    setPan({
+      x: dragRef.current.initialPanX + dx,
+      y: dragRef.current.initialPanY + dy,
+    });
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+    dragRef.current = null;
+  };
+
+  // Touch pinch and drag handlers
+  const handleTouchStart = (e) => {
+    if (e.target.closest('button') || e.target.closest('.no-pan')) return;
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      setIsDragging(true);
+      dragRef.current = {
+        startX: t.clientX,
+        startY: t.clientY,
+        initialPanX: pan.x,
+        initialPanY: pan.y,
+      };
+    } else if (e.touches.length === 2) {
+      setIsDragging(false);
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      touchPinchRef.current = { initialDist: dist, initialZoom: zoom };
+    }
+  };
+
+  const handleTouchMove = (e) => {
+    if (e.touches.length === 1 && isDragging && dragRef.current) {
+      const t = e.touches[0];
+      const dx = t.clientX - dragRef.current.startX;
+      const dy = t.clientY - dragRef.current.startY;
+      setPan({
+        x: dragRef.current.initialPanX + dx,
+        y: dragRef.current.initialPanY + dy,
+      });
+    } else if (e.touches.length === 2 && touchPinchRef.current) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const scale = dist / touchPinchRef.current.initialDist;
+      const nextZoom = Math.max(0.6, Math.min(5.0, +(touchPinchRef.current.initialZoom * scale).toFixed(3)));
+      setZoom(nextZoom);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    setIsDragging(false);
+    dragRef.current = null;
+    touchPinchRef.current = null;
+  };
+
+  // Double click to zoom in or reset
+  const handleDoubleClick = (e) => {
+    if (e.target.closest('button') || e.target.closest('.no-pan')) return;
+    if (zoom > 1.15) {
+      setZoom(1.0);
+      setPan({ x: 0, y: 0 });
+    } else {
+      if (viewerContainerRef.current) {
+        const rect = viewerContainerRef.current.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left - rect.width / 2;
+        const mouseY = e.clientY - rect.top - rect.height / 2;
+        setZoom(2.2);
+        setPan({ x: -mouseX * 1.2, y: -mouseY * 1.2 });
+      } else {
+        setZoom(2.0);
+      }
+    }
+  };
+
+  const handleResetZoom = () => {
+    setZoom(1.0);
+    setPan({ x: 0, y: 0 });
+  };
 
   useEffect(() => {
     if (trackData && trackData.points && trackData.points.length > 0) {
@@ -933,20 +1075,99 @@ export function PosterCanvas({ trackData, config, canvasRef }) {
 
   return (
     <div
-      ref={canvasRef}
-      id="poster-canvas-element"
+      ref={viewerContainerRef}
+      className="relative w-full h-full min-h-[560px] flex items-center justify-center overflow-hidden select-none"
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onDoubleClick={handleDoubleClick}
       style={{
-        background: backgroundStyle,
-        fontFamily: currentFontFamily,
-        color: config.textColor,
-        borderColor: isTransparent ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.08)',
+        cursor: isDragging ? 'grabbing' : zoom > 1.05 ? 'grab' : 'default',
       }}
-      className={`w-full ${
-        isLandscape ? 'aspect-[7/5] max-w-[880px] p-6 sm:p-10' : 'aspect-[5/7] max-w-[580px] p-8 sm:p-12'
-      } shadow-[0_25px_60px_-15px_rgba(0,0,0,0.7)] rounded-xl relative overflow-hidden flex flex-col justify-between transition-all duration-300 select-none ${
-        isTransparent ? 'border border-dashed border-white/20' : ''
-      }`}
     >
+      {/* Floating Zoom & Pan Toolbar */}
+      <div className="absolute top-2 right-2 z-30 flex items-center gap-1 bg-black/75 backdrop-blur-xl px-2 py-1.5 rounded-2xl border border-white/15 shadow-2xl no-pan">
+        <button
+          onClick={() => {
+            setZoom((z) => Math.max(0.6, +(z - 0.25).toFixed(2)));
+          }}
+          className="p-1.5 rounded-xl hover:bg-white/10 text-neutral-300 hover:text-white transition-all active:scale-95"
+          title="Riduci Zoom (-)"
+        >
+          <ZoomOut className="w-4 h-4" />
+        </button>
+
+        <button
+          onClick={handleResetZoom}
+          className="px-2 py-1 rounded-lg hover:bg-white/10 text-xs font-mono font-bold text-neutral-200 hover:text-white transition-all min-w-[50px] text-center"
+          title="Reimposta Zoom a 100%"
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+
+        <button
+          onClick={() => {
+            setZoom((z) => Math.min(5.0, +(z + 0.25).toFixed(2)));
+          }}
+          className="p-1.5 rounded-xl hover:bg-white/10 text-neutral-300 hover:text-white transition-all active:scale-95"
+          title="Aumenta Zoom (+)"
+        >
+          <ZoomIn className="w-4 h-4" />
+        </button>
+
+        <div className="w-[1px] h-4 bg-white/15 mx-0.5" />
+
+        <button
+          onClick={handleResetZoom}
+          className={`p-1.5 rounded-xl hover:bg-white/10 transition-all active:scale-95 ${
+            zoom !== 1 || pan.x !== 0 || pan.y !== 0
+              ? 'text-teal-400 hover:text-teal-300'
+              : 'text-neutral-500'
+          }`}
+          title="Reimposta e Centra (100%)"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* Subtle Zoom Hint Banner */}
+      <div className="absolute bottom-2 inset-x-0 z-30 flex justify-center pointer-events-none">
+        <span className="text-[11px] font-medium text-neutral-400 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full border border-white/10 shadow-lg">
+          {zoom > 1.05
+            ? `🔍 Zoom ${Math.round(zoom * 100)}% • Trascina per esplorare • Doppio clic per centrare`
+            : '🔍 Rotella mouse per zoomare • Trascina per esplorare i dettagli'}
+        </span>
+      </div>
+
+      {/* Scalable & Pannable Transform Wrapper */}
+      <div
+        style={{
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          transformOrigin: 'center center',
+          transition: isDragging ? 'none' : 'transform 0.12s ease-out',
+          willChange: 'transform',
+        }}
+        className="w-full flex items-center justify-center p-2"
+      >
+        <div
+          ref={canvasRef}
+          id="poster-canvas-element"
+          style={{
+            background: backgroundStyle,
+            fontFamily: currentFontFamily,
+            color: config.textColor,
+            borderColor: isTransparent ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.08)',
+          }}
+          className={`w-full ${
+            isLandscape ? 'aspect-[7/5] max-w-[880px] p-6 sm:p-10' : 'aspect-[5/7] max-w-[580px] p-8 sm:p-12'
+          } shadow-[0_25px_60px_-15px_rgba(0,0,0,0.7)] rounded-xl relative overflow-hidden flex flex-col justify-between transition-all duration-300 select-none ${
+            isTransparent ? 'border border-dashed border-white/20' : ''
+          }`}
+        >
       {/* FRAME-BOUNDED MAP & TOPO LAYER (Clipped exactly to selected frame's innermost line) */}
       <div className={`absolute ${getInnermostFrameClasses()} overflow-hidden pointer-events-none z-0 flex items-center justify-center`}>
         {/* Real Minimalist Map Background Layer */}
@@ -1224,6 +1445,8 @@ export function PosterCanvas({ trackData, config, canvasRef }) {
           )}
         </div>
       )}
+        </div>
+      </div>
     </div>
   );
 }
