@@ -211,68 +211,66 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
       const rightPerp = new THREE.Vector3(guideTangent.z, 0, -guideTangent.x).normalize();
       const bestFlank = leftPerp.dot(sunDir) >= rightPerp.dot(sunDir) ? leftPerp : rightPerp;
 
-      let forwardDist = -135; // negative = behind, positive = ahead
-      let sideDist = 0;       // lateral offset towards best exposed flank
-      let heightOffset = 55;  // vertical altitude above terrain
-      let lookTarget = getTrackPoint(Math.min(t + 0.05, 0.999));
+      const vDist = isVertical ? 1.35 : 1.0;
+      const vH = isVertical ? 1.40 : 1.0;
+
+      let forwardDist = -120 * vDist;
+      let sideDist = 0;
+      let heightOffset = 50 * vH;
 
       if (t < 0.20) {
         // Stage 1: Dietro all'atleta in inseguimento dinamico
-        forwardDist = -135;
+        forwardDist = -120 * vDist;
         sideDist = 0;
-        heightOffset = 55;
-        lookTarget = getTrackPoint(Math.min(t + 0.05, 0.999));
+        heightOffset = 50 * vH;
       } else if (t < 0.65) {
-        // Stage 2: Rotazione graduale verso il fianco meglio esposto (3/4 vista vallata)
+        // Stage 2: Rotazione graduale verso il fianco meglio esposto
         const p1 = (t - 0.20) / 0.45;
         const smoothP1 = p1 * p1 * (3 - 2 * p1);
-        forwardDist = -135 + smoothP1 * 75; // -135 -> -60
-        sideDist = smoothP1 * 125;          // 0 -> 125m sul fianco
-        heightOffset = 55 + smoothP1 * 20;  // 55 -> 75m
-        lookTarget = getTrackPoint(Math.min(t + 0.04, 0.999));
+        forwardDist = (-120 + smoothP1 * 65) * vDist;
+        sideDist = smoothP1 * 105 * vDist;
+        heightOffset = (50 + smoothP1 * 20) * vH;
       } else {
         // Stage 3: Verso la fine la telecamera vola in avanti ad anticipare l'arrivo
         const p2 = (t - 0.65) / 0.35;
         const smoothP2 = p2 * p2 * (3 - 2 * p2);
-        forwardDist = -60 + smoothP2 * 155; // -60 -> +95 (anticipo frontale)
-        sideDist = 125 - smoothP2 * 55;     // 125 -> 70 (inquadratura 3/4 anteriore)
-        heightOffset = 75 + smoothP2 * 12;  // 75 -> 87m
-        
-        // In anticipazione, guarda tra l'atleta in arrivo e il traguardo
-        const leadLook = currentTrackPt.clone().add(guideTangent.clone().multiplyScalar(15));
-        lookTarget = leadLook;
+        forwardDist = (-55 + smoothP2 * 145) * vDist;
+        sideDist = (105 - smoothP2 * 45) * vDist;
+        heightOffset = (70 + smoothP2 * 15) * vH;
       }
 
       desiredPosition
-        .copy(guidePt)
+        .copy(currentTrackPt)
         .add(guideTangent.clone().multiplyScalar(forwardDist))
         .add(bestFlank.clone().multiplyScalar(sideDist))
         .add(new THREE.Vector3(0, heightOffset, 0));
 
-      desiredPosition.y = Math.max(currentTrackPt.y + 35, desiredPosition.y);
-      desiredLookAt.copy(lookTarget).add(new THREE.Vector3(0, 6, 0));
-      lerpFactor = 0.035;
+      desiredPosition.y = Math.max(currentTrackPt.y + 25 * vH, desiredPosition.y);
+      desiredLookAt.copy(currentTrackPt).add(new THREE.Vector3(0, isVertical ? 5 : 8, 0));
+      lerpFactor = 0.04;
     }
 
     // 2. VOLO D'AQUILA (High-Altitude Cinematic 45° Angle)
     else if (mode === 'eagle') {
-      const highDist = 280;
-      const highHeight = 160;
+      const vDist = isVertical ? 1.35 : 1.0;
+      const vH = isVertical ? 1.40 : 1.0;
+      const highDist = 260 * vDist;
+      const highHeight = 150 * vH;
 
       desiredPosition
-        .copy(guidePt)
+        .copy(currentTrackPt)
         .sub(guideTangent.clone().multiplyScalar(highDist))
         .add(new THREE.Vector3(0, highHeight, 0));
 
-      desiredLookAt.copy(getTrackPoint(Math.min(t + 0.08, 0.999)));
-      lerpFactor = 0.025;
+      desiredLookAt.copy(currentTrackPt).add(new THREE.Vector3(0, isVertical ? 4 : 8, 0));
+      lerpFactor = 0.035;
     }
 
     // 3. ORBITA PANORAMICA (Smooth 360° rotation around massif)
     else if (mode === 'orbit') {
       const orbitAngle = t * Math.PI * 2.2;
-      const orbitRadius = Math.max(380, trackSpan * 0.7);
-      const orbitHeight = Math.max(220, trackSpan * 0.45);
+      const orbitRadius = Math.max(380, trackSpan * (isVertical ? 0.9 : 0.7));
+      const orbitHeight = Math.max(220, trackSpan * (isVertical ? 0.6 : 0.45));
 
       desiredPosition.set(
         centroid.x + orbitRadius * Math.cos(orbitAngle),
@@ -280,60 +278,59 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
         centroid.z + orbitRadius * Math.sin(orbitAngle)
       );
 
-      desiredLookAt.copy(currentTrackPt);
+      desiredLookAt.copy(currentTrackPt).add(new THREE.Vector3(0, 8, 0));
       lerpFactor = 0.04;
     }
 
     // 4. REGIA MULTI-ANGOLO (Dynamic alternating focal lengths & angles)
     else if (mode === 'cinematic') {
       const shotIndex = Math.floor(t * 4);
+      const vMul = isVertical ? 1.35 : 1.0;
 
       if (shotIndex === 0) {
         // High 3/4 front view
-        desiredPosition.copy(guidePt).add(new THREE.Vector3(120, 100, 120));
-        desiredLookAt.copy(currentTrackPt);
+        desiredPosition.copy(currentTrackPt).add(new THREE.Vector3(100 * vMul, 90 * vMul, 100 * vMul));
       } else if (shotIndex === 1) {
         // Low lateral tracking shot
-        const sidePerp = new THREE.Vector3(-guideTangent.z, 0, guideTangent.x).multiplyScalar(90);
-        desiredPosition.copy(guidePt).add(sidePerp).add(new THREE.Vector3(0, 45, 0));
-        desiredLookAt.copy(currentTrackPt);
+        const sidePerp = new THREE.Vector3(-guideTangent.z, 0, guideTangent.x).multiplyScalar(85 * vMul);
+        desiredPosition.copy(currentTrackPt).add(sidePerp).add(new THREE.Vector3(0, 45 * vMul, 0));
       } else if (shotIndex === 2) {
         // Top-down bird's eye view
-        desiredPosition.copy(currentTrackPt).add(new THREE.Vector3(0, 240, 20));
-        desiredLookAt.copy(currentTrackPt);
+        desiredPosition.copy(currentTrackPt).add(new THREE.Vector3(0, 220 * vMul, 20));
       } else {
         // Grand valley chase view
         desiredPosition
-          .copy(guidePt)
-          .sub(guideTangent.clone().multiplyScalar(180))
-          .add(new THREE.Vector3(0, 90, 0));
-        desiredLookAt.copy(getTrackPoint(Math.min(t + 0.05, 0.999)));
+          .copy(currentTrackPt)
+          .sub(guideTangent.clone().multiplyScalar(160 * vMul))
+          .add(new THREE.Vector3(0, 80 * vMul, 0));
       }
-      lerpFactor = 0.03;
+      desiredLookAt.copy(currentTrackPt).add(new THREE.Vector3(0, 6, 0));
+      lerpFactor = 0.035;
     }
 
     // 5. INTRO & OUTRO TOTALE
     else if (mode === 'overview') {
+      const vMul = isVertical ? 1.35 : 1.0;
       if (t < 0.15) {
         const introT = t / 0.15;
-        const highOverview = new THREE.Vector3(centroid.x, centroid.y + 600, centroid.z + 300);
-        const lowChase = guidePt.clone().sub(guideTangent.clone().multiplyScalar(130)).add(new THREE.Vector3(0, 65, 0));
+        const highOverview = new THREE.Vector3(centroid.x, centroid.y + 550 * vMul, centroid.z + 280 * vMul);
+        const lowChase = currentTrackPt.clone().sub(guideTangent.clone().multiplyScalar(120 * vMul)).add(new THREE.Vector3(0, 60 * vMul, 0));
         desiredPosition.lerpVectors(highOverview, lowChase, introT * introT);
         desiredLookAt.lerpVectors(centroid, currentTrackPt, introT);
       } else if (t < 0.85) {
         desiredPosition
-          .copy(guidePt)
-          .sub(guideTangent.clone().multiplyScalar(130))
-          .add(new THREE.Vector3(0, 65, 0));
-        desiredLookAt.copy(getTrackPoint(Math.min(t + 0.05, 0.999)));
+          .copy(currentTrackPt)
+          .sub(guideTangent.clone().multiplyScalar(120 * vMul))
+          .add(new THREE.Vector3(0, 60 * vMul, 0));
+        desiredLookAt.copy(currentTrackPt).add(new THREE.Vector3(0, 6, 0));
       } else {
         const outroT = (t - 0.85) / 0.15;
-        const lowChase = guidePt.clone().sub(guideTangent.clone().multiplyScalar(130)).add(new THREE.Vector3(0, 65, 0));
-        const highOverview = new THREE.Vector3(centroid.x, centroid.y + 600, centroid.z + 250);
+        const lowChase = currentTrackPt.clone().sub(guideTangent.clone().multiplyScalar(120 * vMul)).add(new THREE.Vector3(0, 60 * vMul, 0));
+        const highOverview = new THREE.Vector3(centroid.x, centroid.y + 550 * vMul, centroid.z + 240 * vMul);
         desiredPosition.lerpVectors(lowChase, highOverview, outroT * outroT);
         desiredLookAt.lerpVectors(currentTrackPt, centroid, outroT);
       }
-      lerpFactor = 0.03;
+      lerpFactor = 0.035;
     }
 
     // 6. REGIA MANUALE CON KEYFRAME
@@ -377,11 +374,7 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
         centroid.z + driftedDir.z * camDist
       );
 
-      const grandOverviewLook = new THREE.Vector3(
-        centroid.x - driftedDir.x * (camDist * 0.10),
-        centroid.y,
-        centroid.z - driftedDir.z * (camDist * 0.10)
-      );
+      const grandOverviewLook = centroid.clone();
 
       desiredPosition.lerpVectors(finishPos, grandOverviewPos, smoothP);
       desiredLookAt.lerpVectors(finishLook, grandOverviewLook, smoothP);

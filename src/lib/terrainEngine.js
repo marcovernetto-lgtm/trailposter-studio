@@ -370,9 +370,37 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
   const demZoom = Math.min(15, Math.max(12, zoom));
 
-  onProgress(15, `Scaricamento mappa 4K Ultra HD (${numTilesX}×${numTilesY} tile) a Zoom ${zoom}...`);
+  // 2.b Calculate Distant Regional Background Horizon Bounds (4x Area at Low Zoom Z-4)
+  const centerMx = (gridMinMx + gridMaxMx) * 0.5;
+  const centerMy = (gridMinMy + gridMaxMy) * 0.5;
+  const bgSpanX = gridSpanX * 4.2;
+  const bgSpanY = gridSpanY * 4.2;
+  const bgMinMx = centerMx - bgSpanX * 0.5;
+  const bgMaxMx = centerMx + bgSpanX * 0.5;
+  const bgMinMy = centerMy - bgSpanY * 0.5;
+  const bgMaxMy = centerMy + bgSpanY * 0.5;
 
-  // 3. Load 4K Satellite Tiles & DEM Elevation Tiles in Parallel Pool
+  const bgZoom = Math.max(7, zoom - 4);
+  const bgMinT = mercatorToTile(bgMinMx, bgMaxMy, bgZoom);
+  const bgMaxT = mercatorToTile(bgMaxMx, bgMinMy, bgZoom);
+  const bgStartTx = bgMinT.tx;
+  const bgEndTx = bgMaxT.tx;
+  const bgStartTy = bgMinT.ty;
+  const bgEndTy = bgMaxT.ty;
+  const bgNumTilesX = bgEndTx - bgStartTx + 1;
+  const bgNumTilesY = bgEndTy - bgStartTy + 1;
+  const bgTileSizeM = C_EARTH / Math.pow(2, bgZoom);
+
+  const bgGridMinMx = bgStartTx * bgTileSizeM - C_EARTH / 2;
+  const bgGridMaxMx = (bgEndTx + 1) * bgTileSizeM - C_EARTH / 2;
+  const bgGridMaxMy = C_EARTH / 2 - bgStartTy * bgTileSizeM;
+  const bgGridMinMy = C_EARTH / 2 - (bgEndTy + 1) * bgTileSizeM;
+  const bgGridSpanX = bgGridMaxMx - bgGridMinMx;
+  const bgGridSpanY = bgGridMaxMy - bgGridMinMy;
+
+  onProgress(15, `Scaricamento mappa 4K Ultra HD e sfondo panoramico (${numTilesX * numTilesY + bgNumTilesX * bgNumTilesY} tile)...`);
+
+  // 3. Load 4K Satellite Tiles & Background Map in Parallel Pool
   const mapCanvas = document.createElement('canvas');
   mapCanvas.width = numTilesX * 256;
   mapCanvas.height = numTilesY * 256;
@@ -380,66 +408,86 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   mapCtx.fillStyle = '#141a22';
   mapCtx.fillRect(0, 0, mapCanvas.width, mapCanvas.height);
 
+  const bgCanvas = document.createElement('canvas');
+  bgCanvas.width = bgNumTilesX * 256;
+  bgCanvas.height = bgNumTilesY * 256;
+  const bgCtx = bgCanvas.getContext('2d');
+  bgCtx.fillStyle = '#0c1017';
+  bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
+
   const elevations = new Map();
   let loadedCount = 0;
 
-  const tileItems = [];
+  const innerTileItems = [];
   for (let ty = startTy; ty <= endTy; ty++) {
     for (let tx = startTx; tx <= endTx; tx++) {
-      tileItems.push({ tx, ty, col: tx - startTx, row: ty - startTy });
+      innerTileItems.push({ tx, ty, col: tx - startTx, row: ty - startTy, isBg: false, z: zoom, dZ: demZoom, tSize: tileSizeM });
     }
   }
 
-  await asyncPool(24, tileItems, async ({ tx, ty, col, row }) => {
+  const bgTileItems = [];
+  for (let ty = bgStartTy; ty <= bgEndTy; ty++) {
+    for (let tx = bgStartTx; tx <= bgEndTx; tx++) {
+      bgTileItems.push({ tx, ty, col: tx - bgStartTx, row: ty - bgStartTy, isBg: true, z: bgZoom, dZ: null, tSize: bgTileSizeM });
+    }
+  }
+
+  const allTileTasks = [...innerTileItems, ...bgTileItems];
+  const totalAllTiles = allTileTasks.length;
+
+  await asyncPool(28, allTileTasks, async ({ tx, ty, col, row, isBg, z, dZ, tSize }) => {
     const px = col * 256;
     const py = row * 256;
+    const ctx = isBg ? bgCtx : mapCtx;
 
-    // A. Load Esri Satellite Ultra HD Tile
+    // A. Load Satellite Tile
     try {
-      const url = MAP_STYLES.satellite.getTileUrl(zoom, tx, ty);
+      const url = MAP_STYLES.satellite.getTileUrl(z, tx, ty);
       const img = await loadImage(url);
-      mapCtx.drawImage(img, px, py, 256, 256);
+      ctx.drawImage(img, px, py, 256, 256);
     } catch (e) {
-      mapCtx.fillStyle = '#1e2836';
-      mapCtx.fillRect(px, py, 256, 256);
+      ctx.fillStyle = '#1e2836';
+      ctx.fillRect(px, py, 256, 256);
     }
 
-    // B. Load AWS Terrarium DEM Tile
-    try {
-      const tileCenterMx = (tx + 0.5) * tileSizeM - C_EARTH / 2;
-      const tileCenterMy = C_EARTH / 2 - (ty + 0.5) * tileSizeM;
-      const demTile = mercatorToTile(tileCenterMx, tileCenterMy, demZoom);
+    // B. Load DEM Elevation Tile (for 4K inner terrain only)
+    if (!isBg && dZ) {
+      try {
+        const tileCenterMx = (tx + 0.5) * tSize - C_EARTH / 2;
+        const tileCenterMy = C_EARTH / 2 - (ty + 0.5) * tSize;
+        const demTile = mercatorToTile(tileCenterMx, tileCenterMy, dZ);
 
-      const demKey = `${demTile.tx}/${demTile.ty}_${demZoom}`;
-      let eleArray = elevations.get(demKey);
+        const demKey = `${demTile.tx}/${demTile.ty}_${dZ}`;
+        let eleArray = elevations.get(demKey);
 
-      if (!eleArray) {
-        const demUrl = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${demZoom}/${demTile.tx}/${demTile.ty}.png`;
-        const demImg = await loadImage(demUrl);
-        const demCanvas = document.createElement('canvas');
-        demCanvas.width = 256;
-        demCanvas.height = 256;
-        const demCtx = demCanvas.getContext('2d', { willReadFrequently: true });
-        demCtx.drawImage(demImg, 0, 0);
-        const imgData = demCtx.getImageData(0, 0, 256, 256).data;
+        if (!eleArray) {
+          const demUrl = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${dZ}/${demTile.tx}/${demTile.ty}.png`;
+          const demImg = await loadImage(demUrl);
+          const demCanvas = document.createElement('canvas');
+          demCanvas.width = 256;
+          demCanvas.height = 256;
+          const demCtx = demCanvas.getContext('2d', { willReadFrequently: true });
+          demCtx.drawImage(demImg, 0, 0);
+          const imgData = demCtx.getImageData(0, 0, 256, 256).data;
 
-        eleArray = new Float32Array(256 * 256);
-        for (let i = 0; i < 256 * 256; i++) {
-          const r = imgData[i * 4];
-          const g = imgData[i * 4 + 1];
-          const b = imgData[i * 4 + 2];
-          eleArray[i] = (r * 256 + g + b / 256) - 32768;
+          eleArray = new Float32Array(256 * 256);
+          for (let i = 0; i < 256 * 256; i++) {
+            const r = imgData[i * 4];
+            const g = imgData[i * 4 + 1];
+            const b = imgData[i * 4 + 2];
+            eleArray[i] = (r * 256 + g + b / 256) - 32768;
+          }
+          elevations.set(demKey, eleArray);
         }
-        elevations.set(demKey, eleArray);
+      } catch (demErr) {
+        // Continue gracefully
       }
-    } catch (demErr) {
-      // Continue gracefully
     }
 
     loadedCount++;
     onProgress(
-      15 + Math.floor((loadedCount / totalTiles) * 55),
-      `Scaricamento texture satellitare 4K (${loadedCount}/${totalTiles})...`
+      15 + Math.floor((loadedCount / totalAllTiles) * 55),
+      `Scaricamento texture satellitare 4K (${loadedCount}/${totalAllTiles})...`
     );
   });
 
@@ -548,6 +596,48 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   terrainMesh.receiveShadow = true;
   terrainMesh.castShadow = true;
   terrainMesh.renderOrder = 0;
+
+  // 5.b Distant Regional Background Map (Flat Base with Dark Cinematic Vignette)
+  const cx = bgCanvas.width * 0.5;
+  const cy = bgCanvas.height * 0.5;
+  const rInner = Math.min(cx, cy) * 0.28;
+  const rOuter = Math.max(cx, cy) * 0.96;
+
+  const vignette = bgCtx.createRadialGradient(cx, cy, rInner, cx, cy, rOuter);
+  vignette.addColorStop(0.0, 'rgba(12, 16, 23, 0.0)');
+  vignette.addColorStop(0.35, 'rgba(12, 16, 23, 0.30)');
+  vignette.addColorStop(0.65, 'rgba(12, 16, 23, 0.70)');
+  vignette.addColorStop(0.90, 'rgba(12, 16, 23, 0.95)');
+  vignette.addColorStop(1.0, 'rgba(12, 16, 23, 0.99)');
+
+  bgCtx.fillStyle = vignette;
+  bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
+
+  const bgTexture = new THREE.CanvasTexture(bgCanvas);
+  bgTexture.colorSpace = THREE.SRGBColorSpace;
+  bgTexture.generateMipmaps = true;
+  bgTexture.minFilter = THREE.LinearMipmapLinearFilter;
+  bgTexture.magFilter = THREE.LinearFilter;
+
+  const bgWorldWidth = worldWidth * (bgGridSpanX / gridSpanX);
+  const bgWorldHeight = worldHeight * (bgGridSpanY / gridSpanY);
+
+  const bgGeom = new THREE.PlaneGeometry(bgWorldWidth, bgWorldHeight, 2, 2);
+  bgGeom.rotateX(-Math.PI / 2);
+
+  const bgMaterial = new THREE.MeshStandardMaterial({
+    map: bgTexture,
+    roughness: 0.96,
+    metalness: 0.01,
+    flatShading: false,
+  });
+
+  const bgMesh = new THREE.Mesh(bgGeom, bgMaterial);
+  const bgShiftX = ((bgGridMinMx + bgGridSpanX * 0.5 - gridMinMx) / gridSpanX - 0.5) * worldWidth;
+  const bgShiftZ = ((gridMaxMy - (bgGridMaxMy - bgGridSpanY * 0.5)) / gridSpanY - 0.5) * worldHeight;
+  bgMesh.position.set(bgShiftX, -0.6, bgShiftZ);
+  bgMesh.receiveShadow = true;
+  bgMesh.renderOrder = -10;
 
   onProgress(88, 'Creazione percorso GPX e cartelli 3D...');
 
@@ -689,8 +779,9 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   // 9. Construct Three.js Scene & Lighting
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#0c1017');
-  scene.fog = new THREE.FogExp2('#111722', 0.00022);
+  scene.fog = new THREE.FogExp2('#111722', 0.00018);
 
+  scene.add(bgMesh);
   scene.add(terrainMesh);
   scene.add(trackMesh);
   scene.add(markerMesh);
@@ -711,7 +802,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   scene.add(sunLight);
 
   // Ambient & Sky Dome Light
-  const ambLight = new THREE.AmbientLight(0xe0f2fe, 0.8);
+  const ambLight = new THREE.AmbientLight(0xe0f2fe, 0.85);
   scene.add(ambLight);
 
   const hemiLight = new THREE.HemisphereLight(0xbae6fd, 0x1e293b, 0.55);
@@ -746,6 +837,9 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     geometry.dispose();
     terrainMaterial.dispose();
     texture.dispose();
+    bgGeom.dispose();
+    bgMaterial.dispose();
+    bgTexture.dispose();
     ribbonGeom.dispose();
     trackMaterial.dispose();
     markerGeom.dispose();
