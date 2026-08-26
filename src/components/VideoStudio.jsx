@@ -756,7 +756,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
       ctx.fillStyle = grad;
       ctx.fill();
 
-      // 2. Draw Distance & Elevation Gain Stats
+      // 2. Draw Distance (Left aligned)
       ctx.fillStyle = '#ffffff';
       ctx.font = `bold ${16 * baseScale}px "Outfit", system-ui, -apple-system, sans-serif`;
       ctx.textAlign = 'left';
@@ -771,20 +771,19 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
         cardY + 23 * baseScale
       );
 
-      // Total Positive Elevation Gain D+ (Right aligned, Big & Prominent)
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = `bold ${9 * baseScale}px "Outfit", system-ui, -apple-system, sans-serif`;
+      ctx.fillText(`DISTANZA`, cardX + 14 * baseScale, cardY + 38 * baseScale);
+
+      // Progressive Positive Elevation Gain D+ (Right aligned, counts up from 0 to total)
       ctx.textAlign = 'right';
       ctx.fillStyle = '#facc15';
       ctx.font = `bold ${16 * baseScale}px "JetBrains Mono", monospace`;
-      ctx.fillText(`+${totalElevationGain} m`, cardX + cardW - 14 * baseScale, cardY + 23 * baseScale);
+      ctx.fillText(`+${curGain} m`, cardX + cardW - 14 * baseScale, cardY + 23 * baseScale);
 
       ctx.fillStyle = '#94a3b8';
       ctx.font = `bold ${9 * baseScale}px "Outfit", system-ui, -apple-system, sans-serif`;
       ctx.fillText(`D+ TOTALE`, cardX + cardW - 14 * baseScale, cardY + 38 * baseScale);
-
-      ctx.textAlign = 'left';
-      ctx.fillStyle = '#f59e0b';
-      ctx.font = `bold ${10 * baseScale}px "Outfit", system-ui, -apple-system, sans-serif`;
-      ctx.fillText(`+${curGain}m D+`, cardX + 14 * baseScale, cardY + 39 * baseScale);
 
       // 3. Draw Progressive Elevation Profile Curve
       const chartX = cardX + 14 * baseScale;
@@ -1644,9 +1643,8 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
                       </span>
                       <span className="text-[10px] text-neutral-400 font-medium">/ {totalDistanceKm} km</span>
                     </div>
-                    <p className="text-[10px] text-amber-400/90 font-medium flex items-center gap-1">
-                      <TrendingUp className="w-3 h-3 text-amber-400" />
-                      +{currentTelemetry.gainM}m D+
+                    <p className="text-[9px] text-neutral-400 font-bold uppercase tracking-wider">
+                      Distanza
                     </p>
                   </div>
 
@@ -1656,7 +1654,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
                         aspectRatio === '9:16' ? 'text-sm' : 'text-base'
                       } font-extrabold text-amber-300 font-mono tracking-tight`}
                     >
-                      +{totalElevationGain} m
+                      +{currentTelemetry.gainM} m
                     </span>
                     <p className="text-[9px] text-neutral-400 font-bold uppercase tracking-wider">
                       D+ Totale
