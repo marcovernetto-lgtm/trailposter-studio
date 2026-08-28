@@ -42,7 +42,7 @@ function mercatorToTile(mx, my, zoom) {
 }
 
 // Load Image with Promise, Timeout and CORS safety
-function loadImage(url, timeoutMs = 8000) {
+function loadImage(url, timeoutMs = 9000) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -63,6 +63,28 @@ function loadImage(url, timeoutMs = 8000) {
 
     img.src = url;
   });
+}
+
+// Load Image with automatic retries and subdomain rotation on failure
+async function loadImageWithRetry(url, maxRetries = 3, timeoutMs = 9000) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      let targetUrl = url;
+      if (attempt > 0 && url.includes('arcgisonline.com')) {
+        targetUrl = attempt % 2 === 1
+          ? url.replace('server.arcgisonline.com', 'services.arcgisonline.com')
+          : url.replace('services.arcgisonline.com', 'server.arcgisonline.com');
+      }
+      return await loadImage(targetUrl, timeoutMs);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < maxRetries - 1) {
+        await new Promise((r) => setTimeout(r, 150 * (attempt + 1) + Math.random() * 80));
+      }
+    }
+  }
+  throw lastErr;
 }
 
 /**
@@ -355,8 +377,8 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   const totalSpanM = Math.max(boundMaxMx - boundMinMx, boundMaxMy - boundMinMy);
 
   // 2. Intelligent Dynamic Zoom Selection (Always Maximum Ultra 4K/6K HD Resolution)
-  const maxAxisTiles = 30;
-  const maxTotalTiles = 625;
+  const maxAxisTiles = 24;
+  const maxTotalTiles = 360;
 
   let zoom = 15;
   let startTx = 0, endTx = 0, startTy = 0, endTy = 0;
@@ -470,19 +492,31 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   const allTileTasks = [...innerTileItems, ...bgTileItems];
   const totalAllTiles = allTileTasks.length;
 
-  await asyncPool(36, allTileTasks, async ({ tx, ty, col, row, isBg, z, dZ, tSize }) => {
+  await asyncPool(16, allTileTasks, async ({ tx, ty, col, row, isBg, z, dZ, tSize }) => {
     const px = col * 256;
     const py = row * 256;
     const ctx = isBg ? bgCtx : mapCtx;
 
-    // A. Load Satellite Tile
+    // A. Load Satellite Tile with Retry & Fallback to prevent any missing squares
     try {
       const url = MAP_STYLES.satellite.getTileUrl(z, tx, ty);
-      const img = await loadImage(url);
+      const img = await loadImageWithRetry(url, 3, 9000);
       ctx.drawImage(img, px, py, 256, 256);
     } catch (e) {
-      ctx.fillStyle = '#1e2836';
-      ctx.fillRect(px, py, 256, 256);
+      // Fallback: load parent tile at z - 1, crop quadrant
+      try {
+        const parentZ = z - 1;
+        const parentTx = Math.floor(tx / 2);
+        const parentTy = Math.floor(ty / 2);
+        const parentUrl = MAP_STYLES.satellite.getTileUrl(parentZ, parentTx, parentTy);
+        const parentImg = await loadImageWithRetry(parentUrl, 2, 7000);
+        const sx = (tx % 2) * 128;
+        const sy = (ty % 2) * 128;
+        ctx.drawImage(parentImg, sx, sy, 128, 128, px, py, 256, 256);
+      } catch (fallbackErr) {
+        ctx.fillStyle = '#223020'; // Soft natural green-dark fallback
+        ctx.fillRect(px, py, 256, 256);
+      }
     }
 
     // B. Load DEM Elevation Tile (for 4K inner terrain only)
@@ -497,7 +531,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
         if (!eleArray) {
           const demUrl = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${dZ}/${demTile.tx}/${demTile.ty}.png`;
-          const demImg = await loadImage(demUrl);
+          const demImg = await loadImageWithRetry(demUrl, 3, 9000);
           const demCanvas = document.createElement('canvas');
           demCanvas.width = 256;
           demCanvas.height = 256;
@@ -848,17 +882,17 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   camera.position.set(0, worldHeight * 0.6, worldHeight * 0.7);
   camera.lookAt(0, 0, 0);
 
-  // 11. Animation / Progress Update Function (with Dynamic Outro Line Thickening)
-  const baseTrackWidth = config.trackWidth || 1.6;
+  // 11. Animation / Progress Update Function (with Balanced Outro Line Thickening)
+  const baseTrackWidth = config.trackWidth || 1.4;
   let currentRibbonWidth = baseTrackWidth;
 
   const updateProgress = (t, outroProgress = 0) => {
     const clampedT = Math.max(0, Math.min(1, t));
     const clampedOutro = Math.max(0, Math.min(1, outroProgress));
 
-    // Dynamic Outro Width Thickening (Smooth expansion when camera zooms out)
+    // Dynamic Outro Width Thickening (Clean, balanced expansion when camera zooms out)
     const smoothOutro = clampedOutro * clampedOutro * (3 - 2 * clampedOutro);
-    const targetRibbonWidth = baseTrackWidth * (1.0 + smoothOutro * 4.8);
+    const targetRibbonWidth = baseTrackWidth * (1.0 + smoothOutro * 1.35); // Smoothly expands to ~3.3m
 
     if (Math.abs(targetRibbonWidth - currentRibbonWidth) > 0.02) {
       if (typeof ribbonGeom.updateWidth === 'function') {
@@ -867,8 +901,8 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
       currentRibbonWidth = targetRibbonWidth;
     }
 
-    // Boost emissive glow during outro for crisp, punchy contrast against mountain terrain
-    trackMaterial.emissiveIntensity = 1.25 + smoothOutro * 0.70;
+    // Boost emissive glow slightly during outro for crisp, punchy contrast
+    trackMaterial.emissiveIntensity = 1.25 + smoothOutro * 0.45;
 
     // Update illuminated ribbon draw range
     const drawCount = Math.floor(totalIndexCount * clampedT);
@@ -878,7 +912,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     const pos = trackCurve.getPointAt(clampedT);
     const groundY = getGroundYAt(pos.x, pos.z);
     markerMesh.position.set(pos.x, Math.max(pos.y, groundY) + 0.6, pos.z);
-    markerMesh.scale.setScalar(1.0 + smoothOutro * 3.2);
+    markerMesh.scale.setScalar(1.0 + smoothOutro * 1.4);
 
     return { position: pos };
   };
