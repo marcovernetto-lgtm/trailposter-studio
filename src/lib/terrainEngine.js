@@ -190,7 +190,7 @@ function createWaypointPlacardTexture(name, index = 1) {
 function createConformalFlatRibbonGeometry(
   curve,
   numSegments = 1800,
-  width = 1.4,
+  width = 1.6,
   getGroundYAt = (vx, vz) => 0
 ) {
   const points = curve.getSpacedPoints(numSegments);
@@ -201,6 +201,7 @@ function createConformalFlatRibbonGeometry(
   const indices = [];
 
   const lift = 0.55; // Clearance above ground mesh
+  const perps = [];
 
   for (let i = 0; i <= numSegments; i++) {
     const t = i / numSegments;
@@ -209,6 +210,7 @@ function createConformalFlatRibbonGeometry(
 
     // Perpendicular horizontal vector
     const perp = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+    perps.push(perp);
     const halfW = width * 0.5;
 
     // Left vertex position
@@ -261,6 +263,37 @@ function createConformalFlatRibbonGeometry(
   geom.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
   geom.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
   geom.setIndex(indices);
+
+  // Dynamic real-time width updater (smoothly expands ribbon when zooming out)
+  geom.updateWidth = (newWidth) => {
+    const halfW = newWidth * 0.5;
+    const posAttr = geom.attributes.position;
+    const posArray = posAttr.array;
+
+    for (let i = 0; i <= numSegments; i++) {
+      const pt = points[i];
+      const perp = perps[i];
+
+      const lx = pt.x - perp.x * halfW;
+      const lz = pt.z - perp.z * halfW;
+      const ly = Math.max(pt.y, getGroundYAt(lx, lz)) + lift;
+
+      const rx = pt.x + perp.x * halfW;
+      const rz = pt.z + perp.z * halfW;
+      const ry = Math.max(pt.y, getGroundYAt(rx, rz)) + lift;
+
+      const idx = i * 2;
+      posArray[idx * 3] = lx;
+      posArray[idx * 3 + 1] = ly;
+      posArray[idx * 3 + 2] = lz;
+
+      posArray[(idx + 1) * 3] = rx;
+      posArray[(idx + 1) * 3 + 1] = ry;
+      posArray[(idx + 1) * 3 + 2] = rz;
+    }
+    posAttr.needsUpdate = true;
+  };
+
   return geom;
 }
 
@@ -272,7 +305,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   const config = {
     heightExaggeration: 1.6,
     trackColor: '#ff5500', // Default: High-Contrast Orange
-    trackWidth: 1.4, // Wide flat ribbon width
+    trackWidth: 1.6, // Wide flat ribbon width
     padding: 0.45, // 45% wide framing padding for full mountain valley coverage in 4K
     quality: 'ultra', // 'ultra' | 'high' | 'standard'
     waypoints: [], // Array of waypoints [{ id, name, percent, lat, lon }]
@@ -813,24 +846,43 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   camera.position.set(0, worldHeight * 0.6, worldHeight * 0.7);
   camera.lookAt(0, 0, 0);
 
-  // 11. Animation / Progress Update Function
-  const updateProgress = (t) => {
+  // 11. Animation / Progress Update Function (with Dynamic Outro Line Thickening)
+  const baseTrackWidth = config.trackWidth || 1.6;
+  let currentRibbonWidth = baseTrackWidth;
+
+  const updateProgress = (t, outroProgress = 0) => {
     const clampedT = Math.max(0, Math.min(1, t));
+    const clampedOutro = Math.max(0, Math.min(1, outroProgress));
+
+    // Dynamic Outro Width Thickening (Smooth expansion when camera zooms out)
+    const smoothOutro = clampedOutro * clampedOutro * (3 - 2 * clampedOutro);
+    const targetRibbonWidth = baseTrackWidth * (1.0 + smoothOutro * 2.85);
+
+    if (Math.abs(targetRibbonWidth - currentRibbonWidth) > 0.02) {
+      if (typeof ribbonGeom.updateWidth === 'function') {
+        ribbonGeom.updateWidth(targetRibbonWidth);
+      }
+      currentRibbonWidth = targetRibbonWidth;
+    }
+
+    // Boost emissive glow slightly during outro for crisp visibility from high altitude
+    trackMaterial.emissiveIntensity = 1.25 + smoothOutro * 0.55;
 
     // Update illuminated ribbon draw range
     const drawCount = Math.floor(totalIndexCount * clampedT);
     ribbonGeom.setDrawRange(0, drawCount);
 
-    // Update marker position
+    // Update marker position & scale
     const pos = trackCurve.getPointAt(clampedT);
     const groundY = getGroundYAt(pos.x, pos.z);
     markerMesh.position.set(pos.x, Math.max(pos.y, groundY) + 0.6, pos.z);
+    markerMesh.scale.setScalar(1.0 + smoothOutro * 2.2);
 
     return { position: pos };
   };
 
   // Set initial state at 0%
-  updateProgress(0);
+  updateProgress(0, 0);
 
   // 12. Cleanup Function
   const dispose = () => {

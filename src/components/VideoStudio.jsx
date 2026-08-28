@@ -403,7 +403,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
       }
 
       setPreviewProgress(overallProgress);
-      sceneDataRef.current.updateProgress(tp);
+      sceneDataRef.current.updateProgress(tp, op);
       cameraCtrlRef.current.updateCamera(
         sceneDataRef.current.camera,
         tp,
@@ -447,7 +447,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
     }
 
     if (sceneDataRef.current && cameraCtrlRef.current) {
-      sceneDataRef.current.updateProgress(tp);
+      sceneDataRef.current.updateProgress(tp, op);
       const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
       cameraCtrlRef.current.updateCamera(
         sceneDataRef.current.camera,
@@ -672,7 +672,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
     setPreviewProgress(0);
     if (cameraCtrlRef.current) resetCameraState(cameraCtrlRef.current);
     if (sceneDataRef.current && cameraCtrlRef.current) {
-      sceneDataRef.current.updateProgress(0);
+      sceneDataRef.current.updateProgress(0, 0);
       const activeMode = directorType === 'keyframe' ? 'keyframe' : cameraMode;
       cameraCtrlRef.current.updateCamera(
         sceneDataRef.current.camera,
@@ -906,7 +906,7 @@ export function VideoStudio({ trackData, config, setConfig, onGpxUpload }) {
             op = Math.min(1.0, (elapsed - duration) / OUTRO_SEC);
           }
 
-          sceneDataRef.current.updateProgress(tp);
+          sceneDataRef.current.updateProgress(tp, op);
           cameraCtrlRef.current.updateCamera(
             sceneDataRef.current.camera,
             tp,
