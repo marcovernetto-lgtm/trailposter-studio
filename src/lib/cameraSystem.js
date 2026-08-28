@@ -43,19 +43,21 @@ export const CAMERA_MODES = {
 };
 
 /**
- * Pre-computes a heavily smoothed guide curve for camera tracking.
- * This filters out sudden micro-turns and mountain hairpin jitter.
+ * Pre-computes a heavily smoothed macro guide curve for camera tracking.
+ * This completely filters out sudden micro-turns, hairpin switchbacks, and trail jitter,
+ * providing the majestic glide of a professional cinema helicopter / heavy drone!
  */
-function createSmoothedGuideCurve(trackCurve, samples = 150) {
+function createSmoothedGuideCurve(trackCurve, samples = 260) {
   const rawPoints = [];
   for (let i = 0; i <= samples; i++) {
     const t = i / samples;
     rawPoints.push(trackCurve.getPointAt(Math.min(0.999, t)));
   }
 
-  // Apply Gaussian/Moving average filter (window size = 9)
+  // Apply wide Gaussian moving average filter (window size = 37, sigma = 7.0)
   const smoothedPoints = [];
-  const halfWin = 4;
+  const halfWin = 18;
+  const sigma = 7.0;
 
   for (let i = 0; i <= samples; i++) {
     let sum = new THREE.Vector3();
@@ -64,7 +66,7 @@ function createSmoothedGuideCurve(trackCurve, samples = 150) {
     for (let w = -halfWin; w <= halfWin; w++) {
       const idx = Math.max(0, Math.min(samples, i + w));
       const dist = Math.abs(w);
-      const weight = Math.exp(-(dist * dist) / (2 * 2.0 * 2.0));
+      const weight = Math.exp(-(dist * dist) / (2 * sigma * sigma));
       sum.addScaledVector(rawPoints[idx], weight);
       weightSum += weight;
     }
@@ -79,7 +81,7 @@ function createSmoothedGuideCurve(trackCurve, samples = 150) {
  * Create a camera controller for the given track curve and optional keyframe set.
  */
 export function createCameraController(trackCurve, worldBounds, keyframes = []) {
-  const guideCurve = createSmoothedGuideCurve(trackCurve, 180);
+  const guideCurve = createSmoothedGuideCurve(trackCurve, 260);
 
   const state = {
     currentPosition: new THREE.Vector3(),
@@ -129,6 +131,11 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
     startToFinishVec = new THREE.Vector3(furthestPt.x - startPt.x, 0, furthestPt.z - startPt.z);
   }
   const dirFinish = startToFinishVec.clone().normalize();
+
+  // Compute consistent global sun-exposed flank (prevents flipping from left to right)
+  const sunDir = new THREE.Vector3(0.55, 0.75, 0.35).normalize();
+  const globalLeftPerp = new THREE.Vector3(-dirFinish.z, 0, dirFinish.x).normalize();
+  const preferredGlobalFlank = globalLeftPerp.dot(sunDir) >= 0 ? globalLeftPerp : globalLeftPerp.clone().negate();
 
   /**
    * Evaluates camera position and lookAt from user keyframes
@@ -197,57 +204,57 @@ export function createCameraController(trackCurve, worldBounds, keyframes = []) 
 
     let desiredPosition = new THREE.Vector3();
     let desiredLookAt = new THREE.Vector3();
-    let lerpFactor = 0.04;
+    let lerpFactor = 0.022; // Silky-smooth cinema drone inertia
 
     const currentTrackPt = getTrackPoint(t);
     const guidePt = getGuidePoint(t);
     const guideTangent = getGuideTangent(t);
 
-    // 1. DRONE CINEMATICO
-    // Progression: Inizia da dietro -> ruota gradualmente sul fianco illuminato -> si sposta in avanti ad anticipare
+    // 1. DRONE CINEMATICO (Stabilized Cinema Flight Path)
+    // Moves with realistic drone inertia and consistent valley flank orientation (no sharp snapping on switchbacks)
     if (mode === 'drone') {
-      const sunDir = new THREE.Vector3(0.55, 0.75, 0.35).normalize();
-      const leftPerp = new THREE.Vector3(-guideTangent.z, 0, guideTangent.x).normalize();
-      const rightPerp = new THREE.Vector3(guideTangent.z, 0, -guideTangent.x).normalize();
-      const bestFlank = leftPerp.dot(sunDir) >= rightPerp.dot(sunDir) ? leftPerp : rightPerp;
+      const localLeftPerp = new THREE.Vector3(-guideTangent.z, 0, guideTangent.x).normalize();
+      const smoothFlank = localLeftPerp.dot(preferredGlobalFlank) >= 0 ? localLeftPerp : localLeftPerp.clone().negate();
 
       const vDist = isVertical ? 1.35 : 1.0;
       const vH = isVertical ? 1.40 : 1.0;
 
       let forwardDist = -120 * vDist;
-      let sideDist = 0;
-      let heightOffset = 50 * vH;
+      let sideDist = 35 * vDist;
+      let heightOffset = 55 * vH;
 
       if (t < 0.20) {
-        // Stage 1: Dietro all'atleta in inseguimento dinamico
+        // Stage 1: Soft start behind the athlete gliding along valley trajectory
+        const p0 = t / 0.20;
+        const s0 = p0 * p0 * (3 - 2 * p0);
         forwardDist = -120 * vDist;
-        sideDist = 0;
-        heightOffset = 50 * vH;
-      } else if (t < 0.65) {
-        // Stage 2: Rotazione graduale verso il fianco meglio esposto
-        const p1 = (t - 0.20) / 0.45;
-        const smoothP1 = p1 * p1 * (3 - 2 * p1);
-        forwardDist = (-120 + smoothP1 * 65) * vDist;
-        sideDist = smoothP1 * 105 * vDist;
-        heightOffset = (50 + smoothP1 * 20) * vH;
+        sideDist = (20 + s0 * 50) * vDist;
+        heightOffset = (50 + s0 * 10) * vH;
+      } else if (t < 0.70) {
+        // Stage 2: Majestic high 3/4 tracking shot on the illuminated valley flank
+        const p1 = (t - 0.20) / 0.50;
+        const s1 = p1 * p1 * (3 - 2 * p1);
+        forwardDist = (-120 + s1 * 70) * vDist; // -120 -> -50
+        sideDist = (70 + s1 * 25) * vDist;      // 70 -> 95
+        heightOffset = (60 + s1 * 15) * vH;     // 60 -> 75
       } else {
-        // Stage 3: Verso la fine la telecamera vola in avanti ad anticipare l'arrivo
-        const p2 = (t - 0.65) / 0.35;
-        const smoothP2 = p2 * p2 * (3 - 2 * p2);
-        forwardDist = (-55 + smoothP2 * 145) * vDist;
-        sideDist = (105 - smoothP2 * 45) * vDist;
-        heightOffset = (70 + smoothP2 * 15) * vH;
+        // Stage 3: Smooth glide forward into arrival anticipation
+        const p2 = (t - 0.70) / 0.30;
+        const s2 = p2 * p2 * (3 - 2 * p2);
+        forwardDist = (-50 + s2 * 115) * vDist; // -50 -> +65 (gentle forward lead)
+        sideDist = (95 - s2 * 35) * vDist;      // 95 -> 60
+        heightOffset = (75 + s2 * 10) * vH;     // 75 -> 85
       }
 
       desiredPosition
-        .copy(currentTrackPt)
+        .copy(guidePt)
         .add(guideTangent.clone().multiplyScalar(forwardDist))
-        .add(bestFlank.clone().multiplyScalar(sideDist))
+        .add(smoothFlank.clone().multiplyScalar(sideDist))
         .add(new THREE.Vector3(0, heightOffset, 0));
 
-      desiredPosition.y = Math.max(currentTrackPt.y + 25 * vH, desiredPosition.y);
-      desiredLookAt.copy(currentTrackPt).add(new THREE.Vector3(0, isVertical ? 5 : 8, 0));
-      lerpFactor = 0.04;
+      desiredPosition.y = Math.max(currentTrackPt.y + 30 * vH, desiredPosition.y);
+      desiredLookAt.copy(currentTrackPt).add(new THREE.Vector3(0, isVertical ? 4 : 7, 0));
+      lerpFactor = 0.022; // Heavy drone cinema stabilization
     }
 
     // 2. VOLO D'AQUILA (High-Altitude Cinematic 45° Angle)
