@@ -341,18 +341,22 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   const trackHeightM = Math.max(300, maxMy - minMy);
   const maxSpanM = Math.max(trackWidthM, trackHeightM);
 
-  // Add framing padding around the track
-  const padM = maxSpanM * config.padding;
-  const boundMinMx = minMx - padM;
-  const boundMaxMx = maxMx + padM;
-  const boundMinMy = minMy - padM;
-  const boundMaxMy = maxMy + padM;
+  // Generous square & widescreen-adapted 4K bounding box
+  // Encloses 100% of the camera's field of view in all director modes & outro zoom-out
+  const centerMx = (minMx + maxMx) * 0.5;
+  const centerMy = (minMy + maxMy) * 0.5;
+  const halfSpanM = maxSpanM * (0.5 + Math.max(0.48, config.padding || 0.45));
+
+  const boundMinMx = centerMx - halfSpanM * 1.15; // 15% extra width for 16:9 widescreen
+  const boundMaxMx = centerMx + halfSpanM * 1.15;
+  const boundMinMy = centerMy - halfSpanM * 1.05;
+  const boundMaxMy = centerMy + halfSpanM * 1.05;
 
   const totalSpanM = Math.max(boundMaxMx - boundMinMx, boundMaxMy - boundMinMy);
 
-  // 2. Intelligent Dynamic Zoom Selection (Always Maximum Ultra 4K HD Resolution)
-  const maxAxisTiles = 28;
-  const maxTotalTiles = 450;
+  // 2. Intelligent Dynamic Zoom Selection (Always Maximum Ultra 4K/6K HD Resolution)
+  const maxAxisTiles = 30;
+  const maxTotalTiles = 625;
 
   let zoom = 15;
   let startTx = 0, endTx = 0, startTy = 0, endTy = 0;
@@ -378,7 +382,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   }
 
   if (numTilesX === 0) {
-    zoom = 13;
+    zoom = 12;
     const minT = mercatorToTile(boundMinMx, boundMaxMy, zoom);
     const maxT = mercatorToTile(boundMaxMx, boundMinMy, zoom);
     startTx = minT.tx;
@@ -403,17 +407,15 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
   const demZoom = Math.min(15, Math.max(12, zoom));
 
-  // 2.b Calculate Distant Regional Background Horizon Bounds (4x Area at Low Zoom Z-4)
-  const centerMx = (gridMinMx + gridMaxMx) * 0.5;
-  const centerMy = (gridMinMy + gridMaxMy) * 0.5;
-  const bgSpanX = gridSpanX * 4.2;
-  const bgSpanY = gridSpanY * 4.2;
+  // 2.b Distant Regional Background Horizon Bounds (Safety Base at Y = -0.8)
+  const bgSpanX = gridSpanX * 2.8;
+  const bgSpanY = gridSpanY * 2.8;
   const bgMinMx = centerMx - bgSpanX * 0.5;
   const bgMaxMx = centerMx + bgSpanX * 0.5;
   const bgMinMy = centerMy - bgSpanY * 0.5;
   const bgMaxMy = centerMy + bgSpanY * 0.5;
 
-  const bgZoom = Math.max(7, zoom - 4);
+  const bgZoom = Math.max(8, zoom - 2);
   const bgMinT = mercatorToTile(bgMinMx, bgMaxMy, bgZoom);
   const bgMaxT = mercatorToTile(bgMaxMx, bgMinMy, bgZoom);
   const bgStartTx = bgMinT.tx;
@@ -431,7 +433,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   const bgGridSpanX = bgGridMaxMx - bgGridMinMx;
   const bgGridSpanY = bgGridMaxMy - bgGridMinMy;
 
-  onProgress(15, `Scaricamento mappa 4K Ultra HD e sfondo panoramico (${numTilesX * numTilesY + bgNumTilesX * bgNumTilesY} tile)...`);
+  onProgress(15, `Scaricamento mappa 4K Ultra HD (${numTilesX * numTilesY} tile 4K)...`);
 
   // 3. Load 4K Satellite Tiles & Background Map in Parallel Pool
   const mapCanvas = document.createElement('canvas');
@@ -468,7 +470,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
   const allTileTasks = [...innerTileItems, ...bgTileItems];
   const totalAllTiles = allTileTasks.length;
 
-  await asyncPool(28, allTileTasks, async ({ tx, ty, col, row, isBg, z, dZ, tSize }) => {
+  await asyncPool(36, allTileTasks, async ({ tx, ty, col, row, isBg, z, dZ, tSize }) => {
     const px = col * 256;
     const py = row * 256;
     const ctx = isBg ? bgCtx : mapCtx;
