@@ -125,7 +125,7 @@ export function App() {
           title: parsed.name.toUpperCase(),
           subtitle: `${parsed.stats.totalDistanceKm} KM • +${parsed.stats.elevationGainM}M D+`,
           details: `${parsed.stats.pointCount} Punti • WGS84`,
-          waypoints: parsed.gpxWaypoints.length > 0 ? parsed.gpxWaypoints : prev.waypoints,
+          waypoints: parsed.gpxWaypoints && parsed.gpxWaypoints.length > 0 ? parsed.gpxWaypoints : [],
         }));
       };
       reader.readAsText(file);
