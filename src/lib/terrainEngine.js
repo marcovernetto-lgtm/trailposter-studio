@@ -856,7 +856,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
 
     // Dynamic Outro Width Thickening (Smooth expansion when camera zooms out)
     const smoothOutro = clampedOutro * clampedOutro * (3 - 2 * clampedOutro);
-    const targetRibbonWidth = baseTrackWidth * (1.0 + smoothOutro * 2.85);
+    const targetRibbonWidth = baseTrackWidth * (1.0 + smoothOutro * 4.8);
 
     if (Math.abs(targetRibbonWidth - currentRibbonWidth) > 0.02) {
       if (typeof ribbonGeom.updateWidth === 'function') {
@@ -865,8 +865,8 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
       currentRibbonWidth = targetRibbonWidth;
     }
 
-    // Boost emissive glow slightly during outro for crisp visibility from high altitude
-    trackMaterial.emissiveIntensity = 1.25 + smoothOutro * 0.55;
+    // Boost emissive glow during outro for crisp, punchy contrast against mountain terrain
+    trackMaterial.emissiveIntensity = 1.25 + smoothOutro * 0.70;
 
     // Update illuminated ribbon draw range
     const drawCount = Math.floor(totalIndexCount * clampedT);
@@ -876,7 +876,7 @@ export async function buildTerrainScene(trackPoints, options = {}, onProgress = 
     const pos = trackCurve.getPointAt(clampedT);
     const groundY = getGroundYAt(pos.x, pos.z);
     markerMesh.position.set(pos.x, Math.max(pos.y, groundY) + 0.6, pos.z);
-    markerMesh.scale.setScalar(1.0 + smoothOutro * 2.2);
+    markerMesh.scale.setScalar(1.0 + smoothOutro * 3.2);
 
     return { position: pos };
   };
